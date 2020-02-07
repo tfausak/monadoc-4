@@ -1,0 +1,16 @@
+version: v1.0
+name: Build pipeline
+
+agent:
+  machine:
+    type: e1-standard-2
+  containers:
+    - name: main
+      image: semaphoreci/haskell:8.6.5
+
+blocks:
+  - name: Build block
+    task:
+      jobs:
+        - name: Build job
+          commands_file: build.sh
