@@ -3,10 +3,9 @@ checkout
 mkdir -p "$STACK_ROOT" "$STACK_WORK"
 cache_key="stack-$( checksum stack.yaml )-$( checksum monadoc.cabal )"
 cache restore "$cache_key"
-stack --allow-different-user --system-ghc build --pedantic
+stack --allow-different-user --system-ghc build --copy-bins --local-bin-path container --pedantic
 cache store "$cache_key" .stack
 cp --recursive --verbose data container
-cp --verbose "$( command -v monadoc )" container
 cd container || exit
 mkdir libs
 ldd monadoc | awk '/=>/ { print $3 }' | xargs cp --target-directory libs --verbose
