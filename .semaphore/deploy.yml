@@ -9,6 +9,8 @@ agent:
 blocks:
   - name: Deploy block
     task:
+      secrets:
+        - name: aws-credentials
       jobs:
         - name: Deploy job
           commands_file: deploy.sh
