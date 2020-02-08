@@ -17,3 +17,9 @@ blocks:
       jobs:
         - name: Build job
           commands_file: build.sh
+
+promotions:
+  - name: Deploy promotion
+    pipeline_file: deploy.yml
+    auto_promote:
+      when: result = 'passed' and branch = 'monadoc'

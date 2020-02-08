@@ -1,0 +1,14 @@
+version: v1.0
+name: Deploy pipeline
+
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+
+blocks:
+  - name: Deploy block
+    task:
+      jobs:
+        - name: Deploy job
+          commands_file: deploy.sh
