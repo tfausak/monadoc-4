@@ -19,6 +19,7 @@ import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Internal as Wai
+import qualified Network.Wai.Middleware.Autohead as Middleware
 import qualified Paths_monadoc as Package
 import qualified System.IO as IO
 
@@ -85,7 +86,10 @@ serverName =
 
 
 middleware :: Wai.Middleware
-middleware = addContentLength . addSecurityHeaders
+middleware
+  = Middleware.autohead
+  . addContentLength
+  . addSecurityHeaders
 
 
 addContentLength :: Wai.Middleware
