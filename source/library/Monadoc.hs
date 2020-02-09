@@ -7,7 +7,6 @@ import Data.Function ((&))
 import qualified Control.Exception as Exception
 import qualified Crypto.Hash as Crypto
 import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -20,8 +19,6 @@ import qualified Network.HTTP.Types as Http
 import qualified Network.HTTP.Types.Header as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
-import qualified Network.Wai.Internal as Wai
-import qualified Network.Wai.Middleware.Autohead as Middleware
 import qualified Paths_monadoc as Package
 import qualified System.IO as IO
 
@@ -88,55 +85,18 @@ serverName =
 
 
 middleware :: Wai.Middleware
-middleware
-  = Middleware.autohead
-  . addContentLength
-  . addSecurityHeaders
-  . handleEtag
-
-
-addContentLength :: Wai.Middleware
-addContentLength = Wai.modifyResponse $ \ response -> case response of
-  Wai.ResponseBuilder _ _ builder ->
-    let
-      contentLength = Text.encodeUtf8
-        . Text.pack
-        . show
-        . LazyByteString.length
-        $ Builder.toLazyByteString builder
-    in Wai.mapResponseHeaders ((Http.hContentLength, contentLength) :) response
-  _ -> response
-
-
-addSecurityHeaders :: Wai.Middleware
-addSecurityHeaders = Wai.modifyResponse . Wai.mapResponseHeaders $ mappend
-  [ ("Content-Security-Policy", "default-src 'self'")
-  , ("Referrer-Policy", "no-referrer")
-  , ("X-Content-Type-Options", "nosniff")
-  , ("X-Frame-Options", "deny")
-  ]
+middleware = handleEtag
 
 
 handleEtag :: Wai.Middleware
-handleEtag handle request respond =
-  let expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
-  in handle request $ \ response ->
-    let
-      actual = case response of
-        Wai.ResponseBuilder _ _ builder -> Just
-          . Text.encodeUtf8
-          . Text.pack
-          . show
-          . show
-          . Crypto.hashWith Crypto.SHA256
-          . LazyByteString.toStrict
-          $ Builder.toLazyByteString builder
-        _ -> Nothing
-    in respond $ if actual == expected
-      then Wai.responseLBS Http.notModified304 [] LazyByteString.empty
-      else case actual of
-        Nothing -> response
-        Just etag -> Wai.mapResponseHeaders ((Http.hETag, etag) :) response
+handleEtag handle request respond = handle request $ \ response ->
+  let
+    expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
+    actual = lookup Http.hETag $ Wai.responseHeaders response
+  in respond $ case (Wai.requestMethod request, expected, actual) of
+    ("GET", Just _, Just _) | expected == actual ->
+      responseBS Http.notModified304 [] ByteString.empty
+    _ -> response
 
 
 application :: Wai.Application
@@ -190,14 +150,17 @@ application request respond =
 fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
 fileResponse mime file = do
   path <- Package.getDataFileName file
-  contents <- LazyByteString.readFile path
-  pure $ Wai.responseLBS Http.ok200 [(Http.hContentType, mime)] contents
+  contents <- ByteString.readFile path
+  pure $ responseBS Http.ok200 [(Http.hContentType, mime)] contents
+
 
 
 htmlResponse :: Lucid.Html a -> Wai.Response
 htmlResponse =
-  Wai.responseLBS Http.ok200 [(Http.hContentType, "text/html; charset=utf-8")]
+  responseBS Http.ok200 [(Http.hContentType, "text/html; charset=utf-8")]
+    . LazyByteString.toStrict
     . Lucid.renderBS
+
 
 
 statusResponse :: Http.Status -> Wai.Response
@@ -206,8 +169,29 @@ statusResponse status = textResponse status $ Text.unwords
   , Text.decodeUtf8With Text.lenientDecode $ Http.statusMessage status
   ]
 
+
 textResponse :: Http.Status -> Text.Text -> Wai.Response
 textResponse status =
-  Wai.responseLBS status [(Http.hContentType, "text/plain; charset=utf-8")]
-    . LazyByteString.fromStrict
+  responseBS status [(Http.hContentType, "text/plain; charset=utf-8")]
     . Text.encodeUtf8
+
+
+responseBS
+  :: Http.Status
+  -> Http.ResponseHeaders
+  -> ByteString.ByteString
+  -> Wai.Response
+responseBS status headers strict =
+  let
+    utf8 :: Show a => a -> ByteString.ByteString
+    utf8 = Text.encodeUtf8 . Text.pack . show
+    contentLength = utf8 $ ByteString.length strict
+    etag = utf8 . show $ Crypto.hashWith Crypto.SHA256 strict
+    allHeaders = (Http.hContentLength, contentLength)
+      : ("Content-Security-Policy", "default-src 'self'")
+      : (Http.hETag, etag)
+      : ("Referrer-Policy", "no-referrer")
+      : ("X-Content-Type-Options", "nosniff")
+      : ("X-Frame-Options", "deny")
+      : headers
+  in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
