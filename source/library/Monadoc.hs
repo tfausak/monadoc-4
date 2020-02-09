@@ -133,8 +133,7 @@ application request respond =
 fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
 fileResponse mime file = do
   path <- Package.getDataFileName file
-  contents <- LazyByteString.readFile path
-  pure $ Wai.responseLBS Http.ok200 [(Http.hContentType, mime)] contents
+  pure $ Wai.responseFile Http.ok200 [(Http.hContentType, mime)] path Nothing
 
 
 htmlResponse :: Lucid.Html a -> Wai.Response
