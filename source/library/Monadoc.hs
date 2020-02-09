@@ -8,6 +8,7 @@ import qualified Control.Exception as Exception
 import qualified Crypto.Hash as Crypto
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
+import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
@@ -20,13 +21,17 @@ import qualified Network.HTTP.Types.Header as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Paths_monadoc as Package
+import qualified System.Environment as Environment
 import qualified System.IO as IO
 
 
 main :: IO ()
 main = do
   say "starting up"
-  Warp.runSettings settings $ middleware application
+  commit <- getCommit
+  let serverName = Text.unwords ["monadoc", version, commit]
+  say serverName
+  Warp.runSettings (settings serverName) . middleware $ application serverName
 
 
 say :: Text.Text -> IO ()
@@ -41,14 +46,24 @@ formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
 
 
-settings :: Warp.Settings
-settings = Warp.defaultSettings
+getCommit :: IO Text.Text
+getCommit = do
+  maybeString <- Environment.lookupEnv "monadoc_commit"
+  pure . Text.pack $ Maybe.fromMaybe (replicate 40 '0') maybeString
+
+
+version :: Text.Text
+version = Text.pack $ Version.showVersion Package.version
+
+
+settings :: Text.Text -> Warp.Settings
+settings serverName = Warp.defaultSettings
   & Warp.setBeforeMainLoop beforeMainLoop
   & Warp.setHost host
   & Warp.setLogger logger
   & Warp.setOnExceptionResponse onExceptionResponse
   & Warp.setPort port
-  & Warp.setServerName serverName
+  & Warp.setServerName (Text.encodeUtf8 serverName)
 
 
 beforeMainLoop :: IO ()
@@ -77,13 +92,6 @@ port :: Warp.Port
 port = 8080
 
 
-serverName :: ByteString.ByteString
-serverName =
-  let
-    version = Text.encodeUtf8 . Text.pack $ Version.showVersion Package.version
-  in "monadoc-" <> version
-
-
 middleware :: Wai.Middleware
 middleware = handleEtag
 
@@ -99,35 +107,37 @@ handleEtag handle request respond = handle request $ \ response ->
     _ -> response
 
 
-application :: Wai.Application
-application request respond =
+application :: Text.Text -> Wai.Application
+application serverName request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
-    ("GET", []) -> respond . htmlResponse . Lucid.doctypehtml_ $ do
-      Lucid.head_ $ do
-        Lucid.meta_ [Lucid.charset_ "utf-8"]
-        Lucid.meta_
-          [ Lucid.name_ "viewport"
-          , Lucid.content_ "initial-scale = 1, width = device-width"
-          ]
-        Lucid.title_ "Monadoc"
-        Lucid.link_
-          [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
-      Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-        Lucid.div_ [Lucid.class_ "bg-purple pa3 white"]
-          . Lucid.h1_ [Lucid.class_ "ma0 normal"]
-          $ Lucid.a_
-            [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-            "Monadoc"
-        Lucid.div_ [Lucid.class_ "pa3"]
-          $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
-        Lucid.div_ [Lucid.class_ "gray pa3 tc"]
-          . Lucid.p_ [Lucid.class_ "ma0"]
-          . Lucid.a_
-            [ Lucid.class_ "color-inherit"
-            , Lucid.href_ "https://github.com/tfausak/monadoc"
+    ("GET", []) -> respond . htmlResponse $ do
+      Lucid.doctype_
+      Lucid.html_ [Lucid.lang_ "en-US"] $ do
+        Lucid.head_ $ do
+          Lucid.meta_ [Lucid.charset_ "utf-8"]
+          Lucid.meta_
+            [ Lucid.name_ "viewport"
+            , Lucid.content_ "initial-scale = 1, width = device-width"
             ]
-          $ Lucid.toHtml serverName
+          Lucid.title_ "Monadoc"
+          Lucid.link_
+            [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
+        Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
+          Lucid.div_ [Lucid.class_ "bg-purple pa3 white"]
+            . Lucid.h1_ [Lucid.class_ "ma0 normal"]
+            $ Lucid.a_
+              [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
+              "Monadoc"
+          Lucid.div_ [Lucid.class_ "pa3"]
+            $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
+          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"]
+            . Lucid.p_ [Lucid.class_ "ma0"]
+            . Lucid.a_
+              [ Lucid.class_ "color-inherit"
+              , Lucid.href_ "https://github.com/tfausak/monadoc"
+              ]
+            $ Lucid.toHtml serverName
 
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse "image/x-icon" "favicon.ico"
