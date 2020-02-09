@@ -5,6 +5,7 @@ module Monadoc (main) where
 import Data.Function ((&))
 
 import qualified Control.Exception as Exception
+import qualified Crypto.Hash as Crypto
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as LazyByteString
@@ -16,6 +17,7 @@ import qualified Data.Time as Time
 import qualified Data.Version as Version
 import qualified Lucid
 import qualified Network.HTTP.Types as Http
+import qualified Network.HTTP.Types.Header as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Internal as Wai
@@ -90,6 +92,7 @@ middleware
   = Middleware.autohead
   . addContentLength
   . addSecurityHeaders
+  . handleEtag
 
 
 addContentLength :: Wai.Middleware
@@ -101,7 +104,7 @@ addContentLength = Wai.modifyResponse $ \ response -> case response of
         . show
         . LazyByteString.length
         $ Builder.toLazyByteString builder
-    in Wai.mapResponseHeaders (("Content-Length", contentLength) :) response
+    in Wai.mapResponseHeaders ((Http.hContentLength, contentLength) :) response
   _ -> response
 
 
@@ -112,6 +115,28 @@ addSecurityHeaders = Wai.modifyResponse . Wai.mapResponseHeaders $ mappend
   , ("X-Content-Type-Options", "nosniff")
   , ("X-Frame-Options", "deny")
   ]
+
+
+handleEtag :: Wai.Middleware
+handleEtag handle request respond =
+  let expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
+  in handle request $ \ response ->
+    let
+      actual = case response of
+        Wai.ResponseBuilder _ _ builder -> Just
+          . Text.encodeUtf8
+          . Text.pack
+          . show
+          . show
+          . Crypto.hashWith Crypto.SHA256
+          . LazyByteString.toStrict
+          $ Builder.toLazyByteString builder
+        _ -> Nothing
+    in respond $ if actual == expected
+      then Wai.responseLBS Http.notModified304 [] LazyByteString.empty
+      else case actual of
+        Nothing -> response
+        Just etag -> Wai.mapResponseHeaders ((Http.hETag, etag) :) response
 
 
 application :: Wai.Application
