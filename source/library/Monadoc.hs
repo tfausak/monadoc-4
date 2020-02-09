@@ -6,6 +6,7 @@ import Data.Function ((&))
 
 import qualified Control.Exception as Exception
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -17,6 +18,7 @@ import qualified Lucid
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
+import qualified Network.Wai.Internal as Wai
 import qualified Paths_monadoc as Package
 import qualified System.IO as IO
 
@@ -83,7 +85,20 @@ serverName =
 
 
 middleware :: Wai.Middleware
-middleware = addSecurityHeaders
+middleware = addContentLength . addSecurityHeaders
+
+
+addContentLength :: Wai.Middleware
+addContentLength = Wai.modifyResponse $ \ response -> case response of
+  Wai.ResponseBuilder _ _ builder ->
+    let
+      contentLength = Text.encodeUtf8
+        . Text.pack
+        . show
+        . LazyByteString.length
+        $ Builder.toLazyByteString builder
+    in Wai.mapResponseHeaders (("Content-Length", contentLength) :) response
+  _ -> response
 
 
 addSecurityHeaders :: Wai.Middleware
@@ -146,7 +161,8 @@ application request respond =
 fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
 fileResponse mime file = do
   path <- Package.getDataFileName file
-  pure $ Wai.responseFile Http.ok200 [(Http.hContentType, mime)] path Nothing
+  contents <- LazyByteString.readFile path
+  pure $ Wai.responseLBS Http.ok200 [(Http.hContentType, mime)] contents
 
 
 htmlResponse :: Lucid.Html a -> Wai.Response
