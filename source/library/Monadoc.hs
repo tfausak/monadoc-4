@@ -185,11 +185,16 @@ responseBS status headers strict =
   let
     utf8 :: Show a => a -> ByteString.ByteString
     utf8 = Text.encodeUtf8 . Text.pack . show
-    contentLength = utf8 $ ByteString.length strict
-    etag = utf8 . show $ Crypto.hashWith Crypto.SHA256 strict
-    allHeaders = (Http.hContentLength, contentLength)
-      : ("Content-Security-Policy", "default-src 'self'")
-      : (Http.hETag, etag)
+    allHeaders =
+      (Http.hContentLength, utf8 $ ByteString.length strict)
+      : ( "Content-Security-Policy"
+        , "base-uri 'none'; \
+          \default-src 'self'; \
+          \form-action 'self'; \
+          \frame-ancestors 'none'; \
+          \object-src 'none'"
+        )
+      : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
       : ("Referrer-Policy", "no-referrer")
       : ("X-Content-Type-Options", "nosniff")
       : ("X-Frame-Options", "deny")
