@@ -116,6 +116,8 @@ application request respond =
       response <- fileResponse "image/x-icon" "favicon.ico"
       respond response
 
+    ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 ""
+
     ("GET", ["robots.txt"]) -> respond . textResponse Http.ok200 $ Text.unlines
       [ "User-Agent: *"
       , "Disallow:"
