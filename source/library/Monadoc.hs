@@ -18,6 +18,7 @@ import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Paths_monadoc as Package
+import qualified System.IO as IO
 
 
 main :: IO ()
@@ -30,6 +31,7 @@ say :: Text.Text -> IO ()
 say message = do
   now <- Time.getCurrentTime
   Text.putStrLn $ formatTime now <> " " <> message
+  IO.hFlush IO.stdout
 
 
 formatTime :: Time.UTCTime -> Text.Text
@@ -129,7 +131,8 @@ application request respond =
 fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
 fileResponse mime file = do
   path <- Package.getDataFileName file
-  pure $ Wai.responseFile Http.ok200 [(Http.hContentType, mime)] path Nothing
+  contents <- LazyByteString.readFile path
+  pure $ Wai.responseLBS Http.ok200 [(Http.hContentType, mime)] contents
 
 
 htmlResponse :: Lucid.Html a -> Wai.Response
