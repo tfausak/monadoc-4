@@ -24,7 +24,7 @@ import qualified System.IO as IO
 main :: IO ()
 main = do
   say "starting up"
-  Warp.runSettings settings application
+  Warp.runSettings settings $ middleware application
 
 
 say :: Text.Text -> IO ()
@@ -80,6 +80,19 @@ serverName =
   let
     version = Text.encodeUtf8 . Text.pack $ Version.showVersion Package.version
   in "monadoc-" <> version
+
+
+middleware :: Wai.Middleware
+middleware = addSecurityHeaders
+
+
+addSecurityHeaders :: Wai.Middleware
+addSecurityHeaders = Wai.modifyResponse . Wai.mapResponseHeaders $ mappend
+  [ ("Content-Security-Policy", "default-src 'self'")
+  , ("Referrer-Policy", "no-referrer")
+  , ("X-Content-Type-Options", "nosniff")
+  , ("X-Frame-Options", "deny")
+  ]
 
 
 application :: Wai.Application
