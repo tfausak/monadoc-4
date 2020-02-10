@@ -1,9 +1,11 @@
-FROM debian:stretch-slim
-RUN apt-get update && apt-get upgrade --assume-yes && apt-get install --assume-yes libgmp-dev
-RUN adduser --disabled-password --gecos '' monadoc
-USER monadoc
-WORKDIR /home/monadoc
+FROM debian:testing-20200130-slim
+RUN \
+  apt-get update && \
+  apt-get install --assume-yes libgmp-dev && \
+  adduser --disabled-password --gecos '' leaf
+USER leaf
+WORKDIR /home/leaf
 ADD . .
-ENV monadoc_datadir /home/monadoc/data
+ENV monadoc_datadir /home/leaf/data
 EXPOSE 8080
-CMD /home/monadoc/monadoc
+CMD /home/leaf/monadoc

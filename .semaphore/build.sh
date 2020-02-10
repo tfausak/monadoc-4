@@ -1,9 +1,9 @@
 #! /usr/bin/env sh
 checkout
-mkdir -p "$STACK_ROOT" "$STACK_WORK"
+mkdir --parents .stack/root .stack/work
 cache_key="stack-$( checksum stack.yaml )-$( checksum monadoc.cabal )"
 cache restore "$cache_key"
-stack --allow-different-user --system-ghc build --copy-bins --local-bin-path container --pedantic
+tools/stack.sh build --copy-bins --local-bin-path container --pedantic
 cache store "$cache_key" .stack
 cp --recursive --verbose data container
 cd container || exit

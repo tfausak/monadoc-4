@@ -4,16 +4,11 @@ name: Build pipeline
 agent:
   machine:
     type: e1-standard-2
-  containers:
-    - name: main
-      image: semaphoreci/haskell:8.6.5
+    os_image: ubuntu1804
 
 blocks:
   - name: Build block
     task:
-      env_vars:
-        - { name: STACK_ROOT, value: /root/monadoc/.stack/root }
-        - { name: STACK_WORK, value: .stack/work }
       jobs:
         - name: Build job
           commands_file: build.sh
