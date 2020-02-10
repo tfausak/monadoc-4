@@ -3,7 +3,7 @@ checkout
 mkdir --parents .stack/root .stack/work
 cache_key="stack-$( checksum stack.yaml )-$( checksum monadoc.cabal )"
 cache restore "$cache_key"
-tools/stack.sh build --copy-bins --local-bin-path container --pedantic
+env ROOT=1 tools/stack.sh build --copy-bins --local-bin-path container --pedantic
 cache store "$cache_key" .stack
 cp --recursive --verbose data container
 cd container || exit

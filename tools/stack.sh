@@ -22,6 +22,11 @@ then
   options+=('--publish' '8080:8080')
 fi
 
+if test -n "$ROOT"
+then
+  options+=('--user' 'root:root')
+fi
+
 mkdir --parents "$stackRoot" "$stackWork"
 
 exec docker run "${options[@]}" taylorfausak/stack:2.1.3 \
