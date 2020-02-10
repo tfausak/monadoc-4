@@ -1,4 +1,5 @@
 #! /usr/bin/env sh
+checkout
 zip_file="monadoc-$SEMAPHORE_GIT_SHA.zip"
 cd "$( mktemp --directory )" || exit
 artifact pull workflow "$zip_file"
