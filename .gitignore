@@ -1,2 +1,3 @@
 /.stack/
+/.terraform/
 /stack.yaml.lock
