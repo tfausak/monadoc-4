@@ -202,6 +202,20 @@ resource "aws_lb" "this" {
 }
 
 
+# https://www.terraform.io/docs/providers/aws/r/route53_record.html
+resource "aws_route53_record" "this" {
+  name    = "origin"
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_lb.this.dns_name
+    zone_id                = aws_lb.this.zone_id
+  }
+}
+
+
 # https://www.terraform.io/docs/providers/aws/r/lb_target_group.html
 resource "aws_lb_target_group" "this" {
   port        = 8080
@@ -215,10 +229,20 @@ resource "aws_lb_target_group" "this" {
 }
 
 
+# https://www.terraform.io/docs/providers/aws/r/acm_certificate.html
+resource "aws_acm_certificate" "this" {
+  domain_name       = aws_route53_record.this.fqdn
+  validation_method = "DNS"
+}
+
+
 # https://www.terraform.io/docs/providers/aws/r/lb_listener.html
 resource "aws_lb_listener" "this" {
+  certificate_arn   = aws_acm_certificate.this.arn
   load_balancer_arn = aws_lb.this.arn
-  port              = 80
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
 
   default_action {
     target_group_arn = aws_lb_target_group.this.arn
@@ -348,13 +372,13 @@ resource "aws_cloudfront_distribution" "this" {
   }
 
   origin {
-    domain_name = aws_lb.this.dns_name
+    domain_name = aws_route53_record.this.fqdn
     origin_id   = "monadoc"
 
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "http-only"
+      origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
     }
   }
