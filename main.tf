@@ -4,7 +4,8 @@ variable "commit" {
 
 
 locals {
-  domain_name = "www.monadoc.com" # aws_route53_record.this_extra.fqdn
+  domain_name       = "www.monadoc.com" # aws_route53_record.this_extra.fqdn
+  domain_name_extra = "monadoc.com"     # aws_route53_record.this_extra_extra.fqdn
 }
 
 
@@ -232,6 +233,29 @@ resource "aws_route53_record" "this_extra" {
   }
 }
 
+resource "aws_route53_record" "this_extra_extra" {
+  name    = ""
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_cloudfront_distribution.this_extra.domain_name
+    zone_id                = aws_cloudfront_distribution.this_extra.hosted_zone_id
+  }
+}
+
+
+# https://www.terraform.io/docs/providers/aws/r/s3_bucket.html
+resource "aws_s3_bucket" "this" {
+  acl    = "public-read"
+  bucket = "monadoc.com"
+
+  website {
+    redirect_all_requests_to = "https://${local.domain_name}"
+  }
+}
+
 
 # https://www.terraform.io/docs/providers/aws/r/lb_target_group.html
 resource "aws_lb_target_group" "this" {
@@ -254,6 +278,11 @@ resource "aws_acm_certificate" "this" {
 
 resource "aws_acm_certificate" "this_extra" {
   domain_name       = local.domain_name
+  validation_method = "DNS"
+}
+
+resource "aws_acm_certificate" "this_extra_extra" {
+  domain_name       = local.domain_name_extra
   validation_method = "DNS"
 }
 
@@ -414,6 +443,50 @@ resource "aws_cloudfront_distribution" "this" {
 
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate.this_extra.arn
+    minimum_protocol_version = "TLSv1.1_2016"
+    ssl_support_method       = "sni-only"
+  }
+}
+
+resource "aws_cloudfront_distribution" "this_extra" {
+  aliases = [local.domain_name_extra]
+  enabled = true
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = aws_s3_bucket.this.id
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  origin {
+    domain_name = aws_s3_bucket.this.website_endpoint
+    origin_id   = aws_s3_bucket.this.id
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
+    }
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn      = aws_acm_certificate.this_extra_extra.arn
     minimum_protocol_version = "TLSv1.1_2016"
     ssl_support_method       = "sni-only"
   }
