@@ -3,6 +3,11 @@ variable "commit" {
 }
 
 
+locals {
+  domain_name = "www.monadoc.com" # aws_route53_record.this_extra.fqdn
+}
+
+
 # https://www.terraform.io/docs/configuration/terraform.html
 terraform {
   required_version = "~> 0.12.20"
@@ -215,6 +220,18 @@ resource "aws_route53_record" "this" {
   }
 }
 
+resource "aws_route53_record" "this_extra" {
+  name    = "www"
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_cloudfront_distribution.this.domain_name
+    zone_id                = aws_cloudfront_distribution.this.hosted_zone_id
+  }
+}
+
 
 # https://www.terraform.io/docs/providers/aws/r/lb_target_group.html
 resource "aws_lb_target_group" "this" {
@@ -232,6 +249,11 @@ resource "aws_lb_target_group" "this" {
 # https://www.terraform.io/docs/providers/aws/r/acm_certificate.html
 resource "aws_acm_certificate" "this" {
   domain_name       = aws_route53_record.this.fqdn
+  validation_method = "DNS"
+}
+
+resource "aws_acm_certificate" "this_extra" {
+  domain_name       = local.domain_name
   validation_method = "DNS"
 }
 
@@ -353,6 +375,7 @@ resource "aws_ecs_service" "this" {
 
 # https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html
 resource "aws_cloudfront_distribution" "this" {
+  aliases = [local.domain_name]
   enabled = true
 
   default_cache_behavior {
@@ -390,6 +413,8 @@ resource "aws_cloudfront_distribution" "this" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn      = aws_acm_certificate.this_extra.arn
+    minimum_protocol_version = "TLSv1.1_2016"
+    ssl_support_method       = "sni-only"
   }
 }
