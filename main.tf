@@ -1,14 +1,3 @@
-variable "commit" {
-  type = string
-}
-
-
-locals {
-  domain_name       = "www.monadoc.com" # aws_route53_record.this_extra.fqdn
-  domain_name_extra = "monadoc.com"     # aws_route53_record.this_extra_extra.fqdn
-}
-
-
 # https://www.terraform.io/docs/configuration/terraform.html
 terraform {
   required_version = "~> 0.12.20"
@@ -28,10 +17,24 @@ provider "aws" {
 }
 
 
+locals {
+  domain_apex   = "${local.name}.com"
+  domain_origin = "origin.${local.domain_apex}"
+  domain_www    = "www.${local.domain_apex}"
+  name          = "monadoc"
+  port          = 8080
+}
+
+
+variable "commit" {
+  type = string
+}
+
+
 # https://www.terraform.io/docs/providers/aws/r/ecr_repository.html
 resource "aws_ecr_repository" "this" {
   image_tag_mutability = "IMMUTABLE"
-  name                 = "monadoc"
+  name                 = local.name
 }
 
 
@@ -67,27 +70,27 @@ resource "aws_vpc" "this" {
 
 
 # https://www.terraform.io/docs/providers/aws/r/subnet.html
-resource "aws_subnet" "private" {
+resource "aws_subnet" "private_a" {
   availability_zone = "us-east-1a"
   cidr_block        = "10.10.0.0/24"
   vpc_id            = aws_vpc.this.id
 }
 
-resource "aws_subnet" "private_extra" {
+resource "aws_subnet" "private_b" {
   availability_zone = "us-east-1b"
-  cidr_block        = "10.10.3.0/24"
-  vpc_id            = aws_vpc.this.id
-}
-
-resource "aws_subnet" "public" {
-  availability_zone = "us-east-1a"
   cidr_block        = "10.10.1.0/24"
   vpc_id            = aws_vpc.this.id
 }
 
-resource "aws_subnet" "public_extra" {
+resource "aws_subnet" "public_a" {
+  availability_zone = "us-east-1a"
+  cidr_block        = "10.10.10.0/24"
+  vpc_id            = aws_vpc.this.id
+}
+
+resource "aws_subnet" "public_b" {
   availability_zone = "us-east-1b"
-  cidr_block        = "10.10.2.0/24"
+  cidr_block        = "10.10.11.0/24"
   vpc_id            = aws_vpc.this.id
 }
 
@@ -119,47 +122,47 @@ resource "aws_internet_gateway" "this" {
 
 
 # https://www.terraform.io/docs/providers/aws/r/eip.html
-resource "aws_eip" "this" {
+resource "aws_eip" "a" {
   depends_on = [aws_internet_gateway.this]
   vpc        = true
 }
 
-resource "aws_eip" "this_extra" {
+resource "aws_eip" "b" {
   depends_on = [aws_internet_gateway.this]
   vpc        = true
 }
 
 
 # https://www.terraform.io/docs/providers/aws/r/nat_gateway.html
-resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.this.id
+resource "aws_nat_gateway" "a" {
+  allocation_id = aws_eip.a.id
   depends_on    = [aws_internet_gateway.this]
-  subnet_id     = aws_subnet.public.id
+  subnet_id     = aws_subnet.public_a.id
 }
 
-resource "aws_nat_gateway" "this_extra" {
-  allocation_id = aws_eip.this_extra.id
+resource "aws_nat_gateway" "b" {
+  allocation_id = aws_eip.b.id
   depends_on    = [aws_internet_gateway.this]
-  subnet_id     = aws_subnet.public_extra.id
+  subnet_id     = aws_subnet.public_b.id
 }
 
 
 # https://www.terraform.io/docs/providers/aws/r/route_table.html
-resource "aws_route_table" "private" {
+resource "aws_route_table" "private_a" {
   vpc_id = aws_vpc.this.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this.id
+    nat_gateway_id = aws_nat_gateway.a.id
   }
 }
 
-resource "aws_route_table" "private_extra" {
+resource "aws_route_table" "private_b" {
   vpc_id = aws_vpc.this.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this_extra.id
+    nat_gateway_id = aws_nat_gateway.b.id
   }
 }
 
@@ -174,92 +177,37 @@ resource "aws_route_table" "public" {
 
 
 # https://www.terraform.io/docs/providers/aws/r/route_table_association.html
-resource "aws_route_table_association" "private" {
-  route_table_id = aws_route_table.private.id
-  subnet_id      = aws_subnet.private.id
+resource "aws_route_table_association" "private_a" {
+  route_table_id = aws_route_table.private_a.id
+  subnet_id      = aws_subnet.private_a.id
 }
 
-resource "aws_route_table_association" "private_extra" {
-  route_table_id = aws_route_table.private_extra.id
-  subnet_id      = aws_subnet.private_extra.id
+resource "aws_route_table_association" "private_b" {
+  route_table_id = aws_route_table.private_b.id
+  subnet_id      = aws_subnet.private_b.id
 }
 
-resource "aws_route_table_association" "public" {
+resource "aws_route_table_association" "public_a" {
   route_table_id = aws_route_table.public.id
-  subnet_id      = aws_subnet.public.id
+  subnet_id      = aws_subnet.public_a.id
 }
 
-resource "aws_route_table_association" "public_extra" {
+resource "aws_route_table_association" "public_b" {
   route_table_id = aws_route_table.public.id
-  subnet_id      = aws_subnet.public_extra.id
-}
-
-
-# https://www.terraform.io/docs/providers/aws/r/route53_zone.html
-resource "aws_route53_zone" "this" {
-  name = "monadoc.com"
+  subnet_id      = aws_subnet.public_b.id
 }
 
 
 # https://www.terraform.io/docs/providers/aws/r/lb.html
 resource "aws_lb" "this" {
   security_groups = [aws_security_group.this.id]
-  subnets         = [aws_subnet.public.id, aws_subnet.public_extra.id]
-}
-
-
-# https://www.terraform.io/docs/providers/aws/r/route53_record.html
-resource "aws_route53_record" "this" {
-  name    = "origin"
-  type    = "A"
-  zone_id = aws_route53_zone.this.id
-
-  alias {
-    evaluate_target_health = false
-    name                   = aws_lb.this.dns_name
-    zone_id                = aws_lb.this.zone_id
-  }
-}
-
-resource "aws_route53_record" "this_extra" {
-  name    = "www"
-  type    = "A"
-  zone_id = aws_route53_zone.this.id
-
-  alias {
-    evaluate_target_health = false
-    name                   = aws_cloudfront_distribution.this.domain_name
-    zone_id                = aws_cloudfront_distribution.this.hosted_zone_id
-  }
-}
-
-resource "aws_route53_record" "this_extra_extra" {
-  name    = ""
-  type    = "A"
-  zone_id = aws_route53_zone.this.id
-
-  alias {
-    evaluate_target_health = false
-    name                   = aws_cloudfront_distribution.this_extra.domain_name
-    zone_id                = aws_cloudfront_distribution.this_extra.hosted_zone_id
-  }
-}
-
-
-# https://www.terraform.io/docs/providers/aws/r/s3_bucket.html
-resource "aws_s3_bucket" "this" {
-  acl    = "public-read"
-  bucket = "monadoc.com"
-
-  website {
-    redirect_all_requests_to = "https://${local.domain_name}"
-  }
+  subnets         = [aws_subnet.public_a.id, aws_subnet.public_b.id]
 }
 
 
 # https://www.terraform.io/docs/providers/aws/r/lb_target_group.html
 resource "aws_lb_target_group" "this" {
-  port        = 8080
+  port        = local.port
   protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = aws_vpc.this.id
@@ -270,26 +218,111 @@ resource "aws_lb_target_group" "this" {
 }
 
 
+# https://www.terraform.io/docs/providers/aws/r/route53_zone.html
+resource "aws_route53_zone" "this" {
+  name = local.domain_apex
+}
+
+
+# https://www.terraform.io/docs/providers/aws/r/route53_record.html
+resource "aws_route53_record" "origin" {
+  name    = local.domain_origin
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_lb.this.dns_name
+    zone_id                = aws_lb.this.zone_id
+  }
+}
+
+resource "aws_route53_record" "origin_validation" {
+  name    = aws_acm_certificate.origin.domain_validation_options.0.resource_record_name
+  records = [aws_acm_certificate.origin.domain_validation_options.0.resource_record_value]
+  ttl     = 60
+  type    = aws_acm_certificate.origin.domain_validation_options.0.resource_record_type
+  zone_id = aws_route53_zone.this.id
+}
+
+resource "aws_route53_record" "www" {
+  name    = local.domain_www
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_cloudfront_distribution.www.domain_name
+    zone_id                = aws_cloudfront_distribution.www.hosted_zone_id
+  }
+}
+
+resource "aws_route53_record" "www_validation" {
+  name    = aws_acm_certificate.www.domain_validation_options.0.resource_record_name
+  records = [aws_acm_certificate.www.domain_validation_options.0.resource_record_value]
+  ttl     = 60
+  type    = aws_acm_certificate.www.domain_validation_options.0.resource_record_type
+  zone_id = aws_route53_zone.this.id
+}
+
+resource "aws_route53_record" "apex" {
+  name    = local.domain_apex
+  type    = "A"
+  zone_id = aws_route53_zone.this.id
+
+  alias {
+    evaluate_target_health = false
+    name                   = aws_cloudfront_distribution.apex.domain_name
+    zone_id                = aws_cloudfront_distribution.apex.hosted_zone_id
+  }
+}
+
+resource "aws_route53_record" "apex_validation" {
+  name    = aws_acm_certificate.apex.domain_validation_options.0.resource_record_name
+  records = [aws_acm_certificate.apex.domain_validation_options.0.resource_record_value]
+  ttl     = 60
+  type    = aws_acm_certificate.apex.domain_validation_options.0.resource_record_type
+  zone_id = aws_route53_zone.this.id
+}
+
+
 # https://www.terraform.io/docs/providers/aws/r/acm_certificate.html
-resource "aws_acm_certificate" "this" {
-  domain_name       = aws_route53_record.this.fqdn
+resource "aws_acm_certificate" "origin" {
+  domain_name       = local.domain_origin
   validation_method = "DNS"
 }
 
-resource "aws_acm_certificate" "this_extra" {
-  domain_name       = local.domain_name
+resource "aws_acm_certificate" "www" {
+  domain_name       = local.domain_www
   validation_method = "DNS"
 }
 
-resource "aws_acm_certificate" "this_extra_extra" {
-  domain_name       = local.domain_name_extra
+resource "aws_acm_certificate" "apex" {
+  domain_name       = local.domain_apex
   validation_method = "DNS"
+}
+
+
+# https://www.terraform.io/docs/providers/aws/r/acm_certificate_validation.html
+resource "aws_acm_certificate_validation" "origin" {
+  certificate_arn         = aws_acm_certificate.origin.arn
+  validation_record_fqdns = [aws_route53_record.origin_validation.fqdn]
+}
+
+resource "aws_acm_certificate_validation" "www" {
+  certificate_arn         = aws_acm_certificate.www.arn
+  validation_record_fqdns = [aws_route53_record.www_validation.fqdn]
+}
+
+resource "aws_acm_certificate_validation" "apex" {
+  certificate_arn         = aws_acm_certificate.apex.arn
+  validation_record_fqdns = [aws_route53_record.apex_validation.fqdn]
 }
 
 
 # https://www.terraform.io/docs/providers/aws/r/lb_listener.html
 resource "aws_lb_listener" "this" {
-  certificate_arn   = aws_acm_certificate.this.arn
+  certificate_arn   = aws_acm_certificate.origin.arn
   load_balancer_arn = aws_lb.this.arn
   port              = 443
   protocol          = "HTTPS"
@@ -302,9 +335,113 @@ resource "aws_lb_listener" "this" {
 }
 
 
+# https://www.terraform.io/docs/providers/aws/r/s3_bucket.html
+resource "aws_s3_bucket" "this" {
+  acl    = "public-read"
+  bucket = local.domain_apex
+
+  website {
+    redirect_all_requests_to = "https://${local.domain_www}"
+  }
+}
+
+
+# https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html
+resource "aws_cloudfront_distribution" "www" {
+  aliases             = [local.domain_www]
+  enabled             = true
+  wait_for_deployment = false
+
+  default_cache_behavior {
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    target_origin_id       = local.domain_origin
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = true
+
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  origin {
+    domain_name = aws_route53_record.origin.fqdn
+    origin_id   = local.domain_origin
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
+    }
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn      = aws_acm_certificate.www.arn
+    minimum_protocol_version = "TLSv1.1_2016"
+    ssl_support_method       = "sni-only"
+  }
+}
+
+resource "aws_cloudfront_distribution" "apex" {
+  aliases             = [local.domain_apex]
+  enabled             = true
+  wait_for_deployment = false
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = aws_s3_bucket.this.id
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  origin {
+    domain_name = aws_s3_bucket.this.website_endpoint
+    origin_id   = aws_s3_bucket.this.id
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
+    }
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn      = aws_acm_certificate.apex.arn
+    minimum_protocol_version = "TLSv1.1_2016"
+    ssl_support_method       = "sni-only"
+  }
+}
+
+
 # https://www.terraform.io/docs/providers/aws/r/ecs_cluster.html
 resource "aws_ecs_cluster" "this" {
-  name = "default"
+  name = local.name
 }
 
 
@@ -344,7 +481,7 @@ resource "aws_cloudwatch_log_group" "this" {
 resource "aws_ecs_task_definition" "this" {
   cpu                      = 256
   execution_role_arn       = aws_iam_role.this.arn
-  family                   = "monadoc"
+  family                   = local.name
   memory                   = 512
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -366,13 +503,13 @@ resource "aws_ecs_task_definition" "this" {
           "options": {
             "awslogs-group": "${aws_cloudwatch_log_group.this.name}",
             "awslogs-region": "us-east-1",
-            "awslogs-stream-prefix": "monadoc"
+            "awslogs-stream-prefix": "${local.name}"
           }
         },
-        "name": "monadoc",
+        "name": "${local.name}",
         "portMappings": [
           {
-            "containerPort": 8080
+            "containerPort": ${local.port}
           }
         ]
       }
@@ -386,108 +523,17 @@ resource "aws_ecs_service" "this" {
   cluster         = aws_ecs_cluster.this.arn
   desired_count   = 1
   launch_type     = "FARGATE"
-  name            = "monadoc"
+  name            = local.name
   task_definition = aws_ecs_task_definition.this.arn
 
   load_balancer {
-    container_name   = "monadoc"
-    container_port   = 8080
+    container_name   = local.name
+    container_port   = local.port
     target_group_arn = aws_lb_target_group.this.arn
   }
 
   network_configuration {
     security_groups = [aws_security_group.this.id]
-    subnets         = [aws_subnet.private.id, aws_subnet.private_extra.id]
-  }
-}
-
-
-# https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html
-resource "aws_cloudfront_distribution" "this" {
-  aliases = [local.domain_name]
-  enabled = true
-
-  default_cache_behavior {
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-    target_origin_id       = "monadoc"
-    viewer_protocol_policy = "redirect-to-https"
-
-    forwarded_values {
-      query_string = true
-
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  origin {
-    domain_name = aws_route53_record.this.fqdn
-    origin_id   = "monadoc"
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
-    }
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.this_extra.arn
-    minimum_protocol_version = "TLSv1.1_2016"
-    ssl_support_method       = "sni-only"
-  }
-}
-
-resource "aws_cloudfront_distribution" "this_extra" {
-  aliases = [local.domain_name_extra]
-  enabled = true
-
-  default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = aws_s3_bucket.this.id
-    viewer_protocol_policy = "redirect-to-https"
-
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  origin {
-    domain_name = aws_s3_bucket.this.website_endpoint
-    origin_id   = aws_s3_bucket.this.id
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "http-only"
-      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
-    }
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.this_extra_extra.arn
-    minimum_protocol_version = "TLSv1.1_2016"
-    ssl_support_method       = "sni-only"
+    subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   }
 }
