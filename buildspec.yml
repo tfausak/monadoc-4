@@ -36,7 +36,7 @@ phases:
       - cd container
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
       - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
-      - docker build --tag "$tag" .
+      - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" .
   post_build:
     commands:
       - docker push "$tag"
