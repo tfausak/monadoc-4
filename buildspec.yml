@@ -36,8 +36,12 @@ phases:
       - cabal install --installdir container --jobs
       - cd container
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
-      - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
-      - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" .
+      - tag="$url:$CODEBUILD_SOURCE_VERSION"
+      - docker build --build-arg "COMMIT=$CODEBUILD_SOURCE_VERSION" --tag "$tag" .
   post_build:
     commands:
-      - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc || docker push "$tag"
+      - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_SOURCE_VERSION" --repository-name monadoc || docker push "$tag"
+      - if test "$CODEBUILD_WEBHOOK_TRIGGER" = branch/aws-code-build;
+        then echo 'should deploy';
+        else 'should not deploy';
+        fi
