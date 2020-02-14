@@ -10,6 +10,7 @@ cache:
 phases:
   install:
     commands:
+      - env
       - yum install --assumeyes gmp-devel
       - if test ! -f /usr/local/bin/ghcup;
         then
