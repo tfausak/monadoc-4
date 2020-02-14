@@ -39,4 +39,5 @@ phases:
       - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" .
   post_build:
     commands:
+      - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc
       - docker push "$tag"
