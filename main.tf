@@ -490,12 +490,6 @@ resource "aws_ecs_task_definition" "this" {
   container_definitions = <<-JSON
     [
       {
-        "environment": [
-          {
-            "name": "monadoc_commit",
-            "value": "${var.commit}"
-          }
-        ],
         "essential": true,
         "image": "${aws_ecr_repository.this.repository_url}:${var.commit}",
         "logConfiguration": {

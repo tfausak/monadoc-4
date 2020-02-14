@@ -49,7 +49,7 @@ formatTime =
 getCommit :: IO Text.Text
 getCommit = do
   maybeString <- Environment.lookupEnv "monadoc_commit"
-  pure . Text.pack $ Maybe.fromMaybe (replicate 40 '0') maybeString
+  pure . Text.pack . take 8 $ Maybe.fromMaybe (replicate 40 '0') maybeString
 
 
 version :: Text.Text
