@@ -531,3 +531,39 @@ resource "aws_ecs_service" "this" {
     subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   }
 }
+
+
+# https://www.terraform.io/docs/providers/aws/r/codebuild_project.html
+resource "aws_codebuild_project" "this" {
+  name         = "monadoc-test"
+  service_role = "arn:aws:iam::014479108335:role/service-role/codebuild-monadoc-test-service-role"
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  cache {
+    location = "monadoc/code-build-cache"
+    type     = "S3"
+  }
+
+  environment {
+    compute_type    = "BUILD_GENERAL1_SMALL"
+    image           = "aws/codebuild/amazonlinux2-x86_64-standard:2.0"
+    privileged_mode = true
+    type            = "LINUX_CONTAINER"
+  }
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = "monadoc-codebuild-test-group"
+      stream_name = "monadoc-codebuild-test-stream"
+    }
+  }
+
+  source {
+    location            = "https://github.com/tfausak/monadoc.git"
+    report_build_status = true
+    type                = "GITHUB"
+  }
+}
