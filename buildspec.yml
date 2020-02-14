@@ -1,0 +1,35 @@
+version: 0.2
+
+cache:
+  paths:
+    - /root/.cabal/**/*
+    - /root/.ghcup/**/*
+    - dist-newstyle/**/*
+
+phases:
+  build:
+    commands:
+      - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
+      - yum install --assumeyes gmp-devel
+      - if test ! -f /usr/local/bin/ghcup;
+        then
+        curl --output /usr/local/bin/ghcup https://gitlab.haskell.org/haskell/ghcup/uploads/9f278318810f652a59b1784c2295fa91/ghcup &&
+        chmod +x /usr/local/bin/ghcup;
+        fi
+      - if test ! -f ~/.ghcup/bin/ghc;
+        then
+        ghcup install 8.6.5 &&
+        ghcup set 8.6.5;
+        fi
+      - if test ! -f ~/.ghcup/bin/cabal;
+        then
+        ghcup install-cabal 3.0.0.0;
+        fi
+      - cabal update
+      - cabal install --installdir container --jobs
+      - cd container
+      # - eval "$( aws ecr get-login --no-include-email )"
+      # - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
+      - tag="monadoc:$CODEBUILD_RESOLVED_SOURCE_VERSION"
+      - docker build --tag "$tag" .
+      # - docker push "$tag"
