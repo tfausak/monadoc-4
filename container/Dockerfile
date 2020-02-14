@@ -1,11 +1,12 @@
-FROM debian:testing-20200130-slim
+FROM amazonlinux:2
 RUN \
-  apt-get update && \
-  apt-get install --assume-yes libgmp-dev && \
-  adduser --disabled-password --gecos '' leaf
-USER leaf
-WORKDIR /home/leaf
+  yum install --assumeyes gmp-devel && \
+  yum clean all && \
+  rm --recursive /var/cache/yum
+WORKDIR /root/monadoc
 ADD . .
-ENV monadoc_datadir /home/leaf/data
+ENV monadoc_datadir /root/monadoc/data
 EXPOSE 8080
-CMD /home/leaf/monadoc
+ARG COMMIT
+ENV monadoc_commit $COMMIT
+CMD /home/monadoc/monadoc

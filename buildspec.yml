@@ -2,9 +2,10 @@ version: 0.2
 
 cache:
   paths:
+    - dist-newstyle/**/*
     - /root/.cabal/**/*
     - /root/.ghcup/**/*
-    - dist-newstyle/**/*
+    - /usr/local/bin/ghcup
 
 phases:
   install:
@@ -34,7 +35,7 @@ phases:
       - cabal install --installdir container --jobs
       - cd container
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
-      - tag="monadoc:$CODEBUILD_RESOLVED_SOURCE_VERSION"
+      - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
       - docker build --tag "$tag" .
   post_build:
     commands:
