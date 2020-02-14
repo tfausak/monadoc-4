@@ -9,4 +9,4 @@ ENV monadoc_datadir /root/monadoc/data
 EXPOSE 8080
 ARG COMMIT
 ENV monadoc_commit $COMMIT
-CMD /home/monadoc/monadoc
+CMD /root/monadoc/monadoc
