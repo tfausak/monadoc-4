@@ -7,9 +7,8 @@ cache:
     - dist-newstyle/**/*
 
 phases:
-  build:
+  install:
     commands:
-      - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
       - yum install --assumeyes gmp-devel
       - if test ! -f /usr/local/bin/ghcup;
         then
@@ -25,11 +24,18 @@ phases:
         then
         ghcup install-cabal 3.0.0.0;
         fi
+  pre_build:
+    commands:
+      - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
       - cabal update
+      - eval "$( aws ecr get-login --no-include-email )"
+  build:
+    commands:
       - cabal install --installdir container --jobs
       - cd container
-      # - eval "$( aws ecr get-login --no-include-email )"
-      # - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
+      - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
       - tag="monadoc:$CODEBUILD_RESOLVED_SOURCE_VERSION"
       - docker build --tag "$tag" .
-      # - docker push "$tag"
+  post_build:
+    commands:
+      - docker push "$tag"
