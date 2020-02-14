@@ -10,7 +10,6 @@ cache:
 phases:
   install:
     commands:
-      - env | sort
       - yum install --assumeyes gmp-devel
       - if test ! -f /usr/local/bin/ghcup;
         then
@@ -29,11 +28,15 @@ phases:
   pre_build:
     commands:
       - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
+      - ghcup --version
+      - ghc --version
+      - cabal --version
       - cabal update
       - eval "$( aws ecr get-login --no-include-email )"
   build:
     commands:
-      - cabal install --installdir container --jobs
+      - cabal install --install-method copy --installdir container --jobs
+      - cp --recursive --verbose data container
       - cd container
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
       - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"

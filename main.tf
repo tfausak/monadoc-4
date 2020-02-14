@@ -556,8 +556,8 @@ resource "aws_codebuild_project" "this" {
 
   logs_config {
     cloudwatch_logs {
-      group_name  = "monadoc-codebuild-test-group"
-      stream_name = "monadoc-codebuild-test-stream"
+      group_name  = aws_cloudwatch_log_group.this.name
+      stream_name = "code-build"
     }
   }
 
