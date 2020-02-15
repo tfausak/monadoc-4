@@ -491,7 +491,7 @@ Resources:
       Source:
         Auth:
           Type: OAUTH
-        # Buildspec: path-to/build.spec
+        BuildSpec: aws/code-build.yaml
         Location: https://github.com/tfausak/monadoc.git
         ReportBuildStatus: true
         Type: GITHUB
