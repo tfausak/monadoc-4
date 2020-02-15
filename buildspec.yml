@@ -35,9 +35,9 @@ phases:
       - eval "$( aws ecr get-login --no-include-email )"
   build:
     commands:
-      - cabal install --install-method copy --installdir container --jobs
-      - cp --recursive --verbose data container
-      - cd container
+      - cabal install --install-method copy --installdir docker --jobs
+      - cp --recursive --verbose data docker
+      - cd docker
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
       - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
       - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" .
