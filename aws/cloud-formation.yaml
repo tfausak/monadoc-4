@@ -464,6 +464,8 @@ Resources:
               - Resource:
                   - '*'
                 Action:
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Effect: Allow
