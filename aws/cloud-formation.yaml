@@ -1,11 +1,3 @@
-# TODO: Rename `Bucket` to `ApexBucket`.
-
-# TODO: Rename `LogGroup` to `TaskLogGroup`.
-
-# TODO: Rename `Role` to `TaskRole`.
-
-# TODO: Tighten up permissions used by service roles.
-
 # NOTE: If you are deploying this stack for the first time, be sure to update
 # the domain's name servers to point to the hosted zone's name servers.
 # Otherwise changes to DNS (including certificate validation) won't work.
@@ -17,6 +9,14 @@
 # NOTE: CloudFront distributions usually take about 15 minutes to update. If
 # you're creating them or making a change to them, you can expect deploying to
 # take at least that long.
+
+# NOTE: The CodeBuild project requires OAuth in order to work properly. You
+# only need to set it up once, but it must be done in the console rather than
+# through CloudFormation.
+
+# NOTE: CodePipeline requires a GitHub Personal Access Token to be stored in
+# the Secrets Manager. This is not managed by CloudFormation and must be done
+# in the console.
 
 Parameters:
 
@@ -292,6 +292,7 @@ Resources:
       Name: !Ref WwwDomain
       Type: A
 
+  # TODO: Rename this to `ApexBucket`.
   Bucket: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket.html
     Type: AWS::S3::Bucket
     Properties:
@@ -363,6 +364,7 @@ Resources:
             ]
           }
 
+  # TODO: Rename this to `TaskLogGroup`.
   LogGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
     Type: AWS::Logs::LogGroup
     Properties:
@@ -374,6 +376,7 @@ Resources:
     Properties:
       ClusterName: !Ref Name
 
+  # TODO: Rename this to `TaskRole`.
   Role: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
     Type: AWS::IAM::Role
     Properties:
@@ -470,6 +473,7 @@ Resources:
                   - ecr:DescribeRepositories
                   - logs:CreateLogStream
                   - logs:PutLogEvents
+                  # TODO: Tighten up these permissions.
                   - ecr:*
                   - s3:*
                 Effect: Allow
@@ -479,7 +483,7 @@ Resources:
     Properties:
       Artifacts:
         Location: !Ref MainBucket
-        Name: output
+        Name: artifact
         NamespaceType: BUILD_ID
         Path: code-build/artifacts
         Type: S3
@@ -507,3 +511,78 @@ Resources:
         Type: GITHUB
       Triggers:
         Webhook: true
+
+  Pipeline: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-pipeline.html
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref MainBucket
+        Type: S3
+      Name: !Ref Name
+      # TODO: Manage this service role in CloudFormation.
+      RoleArn: arn:aws:iam::014479108335:role/service-role/AWSCodePipelineServiceRole-us-east-1-monadoc-test
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: tfausak
+                Repo: monadoc
+                Branch: monadoc
+                OAuthToken: '{{resolve:secretsmanager:GitHub:SecretString:PersonalAccessToken}}'
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref Project
+                PrimarySource: SourceArtifact
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Ref Name
+                Capabilities: CAPABILITY_IAM
+                # TODO: Manage this service role in CloudFormation.
+                RoleArn: arn:aws:iam::014479108335:role/monadoc-test-pipeline-cloud-formation
+                TemplatePath: 'BuildArtifact::aws/cloud-formation.yaml'
+                TemplateConfiguration: 'BuildArtifact::aws/configuration.json'
+              InputArtifacts:
+                - Name: BuildArtifact
+
+  PipelineWebhook: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-webhook.html
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: '{{resolve:secretsmanager:GitHub:SecretString:PersonalAccessToken}}'
+      Filters:
+        - JsonPath: '$.ref'
+          MatchEquals: refs/heads/{Branch}
+      Name: !Ref Name
+      RegisterWithThirdParty: true
+      TargetAction: Source
+      TargetPipeline: !Ref Pipeline
+      TargetPipelineVersion: !GetAtt Pipeline.Version
