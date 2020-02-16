@@ -1,0 +1,31 @@
+version: '3.7'
+services:
+
+  aws:
+    build:
+      context: docker
+      dockerfile: aws.docker
+    command: sh -c 'aws --version && exec tail -f /dev/null'
+    environment:
+      AWS_ACCESS_KEY_ID: null
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_SECRET_ACCESS_KEY: null
+    init: true
+    volumes:
+      - $PWD:$PWD
+    working_dir: $PWD
+
+  stack:
+    build:
+      context: docker
+      dockerfile: stack.docker
+    command: sh -c 'stack --version && exec tail -f /dev/null'
+    environment:
+      STACK_ROOT: $PWD/.stack/root
+      STACK_WORK: .stack/work
+    init: true
+    ports:
+      - 8080
+    volumes:
+      - $PWD:$PWD
+    working_dir: $PWD
