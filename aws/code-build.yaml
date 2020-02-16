@@ -44,7 +44,7 @@ phases:
   post_build:
     commands:
       - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc || docker push "$tag" || true
-      - echo "{ \"Parameters\": { \"Commit\": \"$CODEBUILD_RESOLVED_SOURCE_VERSION\" } }' > aws/configuration.json
+      - 'echo "{ \"Parameters\": { \"Commit\": \"$CODEBUILD_RESOLVED_SOURCE_VERSION\" } }" > aws/configuration.json'
 
 artifacts:
   files:
