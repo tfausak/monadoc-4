@@ -3,7 +3,7 @@ WORKDIR /root/monadoc
 ENV monadoc_datadir /root/monadoc/data
 EXPOSE 8080
 RUN \
-  yum install --assumeyes gmp-devel && \
+  yum install --assumeyes gmp-devel postgresql-devel && \
   yum clean all && \
   rm --recursive /var/cache/yum
 ADD monadoc .
