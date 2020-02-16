@@ -478,7 +478,11 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Artifacts:
-        Type: NO_ARTIFACTS
+        Location: !Ref MainBucket
+        Name: output
+        NamespaceType: BUILD_ID
+        Path: code-build/artifacts
+        Type: S3
       Cache:
         Location: !Sub '${MainBucket}/code-build/cache'
         Type: S3
