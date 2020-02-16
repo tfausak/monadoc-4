@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Monadoc (main) where
+module Monadoc
+  ( main
+  )
+where
 
 import Data.Function ((&))
 
@@ -29,8 +32,10 @@ main :: IO ()
 main = do
   say "starting up"
   maybeCommit <- getCommit
-  say $ Text.unwords ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
-  Warp.runSettings (settings maybeCommit) . middleware $ application maybeCommit
+  say $ Text.unwords
+    ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
+  Warp.runSettings (settings maybeCommit) . middleware $ application
+    maybeCommit
 
 
 say :: Text.Text -> IO ()
@@ -54,13 +59,14 @@ version = Text.pack $ Version.showVersion Package.version
 
 
 settings :: Maybe Text.Text -> Warp.Settings
-settings maybeCommit = Warp.defaultSettings
-  & Warp.setBeforeMainLoop beforeMainLoop
-  & Warp.setHost host
-  & Warp.setLogger logger
-  & Warp.setOnExceptionResponse onExceptionResponse
-  & Warp.setPort port
-  & Warp.setServerName (makeServerName maybeCommit)
+settings maybeCommit =
+  Warp.defaultSettings
+    & Warp.setBeforeMainLoop beforeMainLoop
+    & Warp.setHost host
+    & Warp.setLogger logger
+    & Warp.setOnExceptionResponse onExceptionResponse
+    & Warp.setPort port
+    & Warp.setServerName (makeServerName maybeCommit)
 
 
 beforeMainLoop :: IO ()
@@ -76,7 +82,8 @@ logger :: Wai.Request -> Http.Status -> Maybe Integer -> IO ()
 logger request status _ = say $ Text.unwords
   [ Text.decodeUtf8With Text.lenientDecode $ Wai.requestMethod request
   , Text.decodeUtf8With Text.lenientDecode
-    $ Wai.rawPathInfo request <> Wai.rawQueryString request
+  $ Wai.rawPathInfo request
+  <> Wai.rawQueryString request
   , Text.pack . show $ Http.statusCode status
   ]
 
@@ -90,9 +97,10 @@ port = 8080
 
 
 makeServerName :: Maybe Text.Text -> ByteString.ByteString
-makeServerName maybeCommit = Text.encodeUtf8 . Text.concat $ case maybeCommit of
-  Nothing -> ["monadoc-", version]
-  Just commit -> ["monadoc-", version, "+", commit]
+makeServerName maybeCommit =
+  Text.encodeUtf8 . Text.concat $ case maybeCommit of
+    Nothing -> ["monadoc-", version]
+    Just commit -> ["monadoc-", version, "+", commit]
 
 
 middleware :: Wai.Middleware
@@ -100,7 +108,7 @@ middleware = handleEtag
 
 
 handleEtag :: Wai.Middleware
-handleEtag handle request respond = handle request $ \ response ->
+handleEtag handle request respond = handle request $ \response ->
   let
     expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
     actual = lookup Http.hETag $ Wai.responseHeaders response
@@ -125,35 +133,47 @@ application maybeCommit request respond =
             ]
           Lucid.title_ "Monadoc"
           Lucid.link_
-            [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
+            [ Lucid.rel_ "stylesheet"
+            , Lucid.href_ "/static/tachyons-4-11-2.css"
+            ]
         Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
           Lucid.div_ [Lucid.class_ "bg-purple pa3 white"]
             . Lucid.h1_ [Lucid.class_ "ma0 normal"]
             $ Lucid.a_
-              [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-              "Monadoc"
+                [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
+                "Monadoc"
           Lucid.div_ [Lucid.class_ "pa3"]
             $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
-          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"] . Lucid.p_ [Lucid.class_ "ma0"] $ do
-            "Powered by "
-            Lucid.a_
-              [ Lucid.class_ "color-inherit"
-              , Lucid.href_ "https://github.com/tfausak/monadoc"
-              ] "Monadoc"
-            " version "
-            Lucid.a_
-              [ Lucid.class_ "color-inherit"
-              , Lucid.href_ $ "https://github.com/tfausak/monadoc/releases/tag/" <> version
-              ] $ Lucid.toHtml version
-            case maybeCommit of
-              Nothing -> "."
-              Just commit -> do
-                " commit "
+          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"]
+            . Lucid.p_ [Lucid.class_ "ma0"]
+            $ do
+                "Powered by "
                 Lucid.a_
                   [ Lucid.class_ "color-inherit"
-                  , Lucid.href_ $ "https://github.com/tfausak/monadoc/commit/" <> commit
-                  ] . Lucid.toHtml $ Text.take 8 commit
-                "."
+                  , Lucid.href_ "https://github.com/tfausak/monadoc"
+                  ]
+                  "Monadoc"
+                " version "
+                Lucid.a_
+                    [ Lucid.class_ "color-inherit"
+                    , Lucid.href_
+                    $ "https://github.com/tfausak/monadoc/releases/tag/"
+                    <> version
+                    ]
+                  $ Lucid.toHtml version
+                case maybeCommit of
+                  Nothing -> "."
+                  Just commit -> do
+                    " commit "
+                    Lucid.a_
+                        [ Lucid.class_ "color-inherit"
+                        , Lucid.href_
+                        $ "https://github.com/tfausak/monadoc/commit/"
+                        <> commit
+                        ]
+                      . Lucid.toHtml
+                      $ Text.take 8 commit
+                    "."
 
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse "image/x-icon" "favicon.ico"
@@ -161,10 +181,9 @@ application maybeCommit request respond =
 
     ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 ""
 
-    ("GET", ["robots.txt"]) -> respond . textResponse Http.ok200 $ Text.unlines
-      [ "User-Agent: *"
-      , "Disallow:"
-      ]
+    ("GET", ["robots.txt"]) ->
+      respond . textResponse Http.ok200 $ Text.unlines
+        ["User-Agent: *", "Disallow:"]
 
     ("GET", ["static", "tachyons-4-11-2.css"]) -> do
       response <- fileResponse "text/css" "tachyons-4-11-2.css"
@@ -213,16 +232,16 @@ responseBS status headers strict =
     utf8 = Text.encodeUtf8 . Text.pack . show
     allHeaders =
       (Http.hContentLength, utf8 $ ByteString.length strict)
-      : ( "Content-Security-Policy"
-        , "base-uri 'none'; \
+        : ( "Content-Security-Policy"
+          , "base-uri 'none'; \
           \default-src 'self'; \
           \form-action 'self'; \
           \frame-ancestors 'none'; \
           \object-src 'none'"
-        )
-      : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
-      : ("Referrer-Policy", "no-referrer")
-      : ("X-Content-Type-Options", "nosniff")
-      : ("X-Frame-Options", "deny")
-      : headers
+          )
+        : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
+        : ("Referrer-Policy", "no-referrer")
+        : ("X-Content-Type-Options", "nosniff")
+        : ("X-Frame-Options", "deny")
+        : headers
   in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
