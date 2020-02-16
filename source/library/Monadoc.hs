@@ -28,10 +28,9 @@ import qualified System.IO as IO
 main :: IO ()
 main = do
   say "starting up"
-  commit <- getCommit
-  let serverName = Text.unwords ["monadoc", version, commit]
-  say serverName
-  Warp.runSettings (settings serverName) . middleware $ application serverName
+  maybeCommit <- getCommit
+  say $ Text.unwords ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
+  Warp.runSettings (settings maybeCommit) . middleware $ application maybeCommit
 
 
 say :: Text.Text -> IO ()
@@ -46,24 +45,22 @@ formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
 
 
-getCommit :: IO Text.Text
-getCommit = do
-  maybeString <- Environment.lookupEnv "monadoc_commit"
-  pure . Text.pack . take 8 $ Maybe.fromMaybe (replicate 40 '0') maybeString
+getCommit :: IO (Maybe Text.Text)
+getCommit = fmap (fmap Text.pack) $ Environment.lookupEnv "monadoc_commit"
 
 
 version :: Text.Text
 version = Text.pack $ Version.showVersion Package.version
 
 
-settings :: Text.Text -> Warp.Settings
-settings serverName = Warp.defaultSettings
+settings :: Maybe Text.Text -> Warp.Settings
+settings maybeCommit = Warp.defaultSettings
   & Warp.setBeforeMainLoop beforeMainLoop
   & Warp.setHost host
   & Warp.setLogger logger
   & Warp.setOnExceptionResponse onExceptionResponse
   & Warp.setPort port
-  & Warp.setServerName (Text.encodeUtf8 serverName)
+  & Warp.setServerName (makeServerName maybeCommit)
 
 
 beforeMainLoop :: IO ()
@@ -92,6 +89,12 @@ port :: Warp.Port
 port = 8080
 
 
+makeServerName :: Maybe Text.Text -> ByteString.ByteString
+makeServerName maybeCommit = Text.encodeUtf8 . Text.concat $ case maybeCommit of
+  Nothing -> ["monadoc-", version]
+  Just commit -> ["monadoc-", version, "+", commit]
+
+
 middleware :: Wai.Middleware
 middleware = handleEtag
 
@@ -107,8 +110,8 @@ handleEtag handle request respond = handle request $ \ response ->
     _ -> response
 
 
-application :: Text.Text -> Wai.Application
-application serverName request respond =
+application :: Maybe Text.Text -> Wai.Application
+application maybeCommit request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
     ("GET", []) -> respond . htmlResponse $ do
@@ -131,13 +134,26 @@ application serverName request respond =
               "Monadoc"
           Lucid.div_ [Lucid.class_ "pa3"]
             $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
-          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"]
-            . Lucid.p_ [Lucid.class_ "ma0"]
-            . Lucid.a_
+          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"] . Lucid.p_ [Lucid.class_ "ma0"] $ do
+            "Powered by "
+            Lucid.a_
               [ Lucid.class_ "color-inherit"
               , Lucid.href_ "https://github.com/tfausak/monadoc"
-              ]
-            $ Lucid.toHtml serverName
+              ] "Monadoc"
+            " version "
+            Lucid.a_
+              [ Lucid.class_ "color-inherit"
+              , Lucid.href_ $ "https://github.com/tfausak/monadoc/releases/tag/" <> version
+              ] $ Lucid.toHtml version
+            case maybeCommit of
+              Nothing -> "."
+              Just commit -> do
+                " commit "
+                Lucid.a_
+                  [ Lucid.class_ "color-inherit"
+                  , Lucid.href_ $ "https://github.com/tfausak/monadoc/commit/" <> commit
+                  ] . Lucid.toHtml $ Text.take 8 commit
+                "."
 
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse "image/x-icon" "favicon.ico"
