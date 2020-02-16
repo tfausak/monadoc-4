@@ -4,7 +4,7 @@
 
 # TODO: Rename `Role` to `TaskRole`.
 
-# TODO: Tighten up permissions used by service role.
+# TODO: Tighten up permissions used by service roles.
 
 # NOTE: If you are deploying this stack for the first time, be sure to update
 # the domain's name servers to point to the hosted zone's name servers.
