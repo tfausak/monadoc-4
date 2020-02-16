@@ -37,10 +37,9 @@ phases:
     commands:
       - cabal install --install-method copy --installdir docker --jobs
       - cp --recursive --verbose data docker
-      - cd docker
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
       - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
-      - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" .
+      - ( cd docker && docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" . )
   post_build:
     commands:
       - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc || docker push "$tag" || true
