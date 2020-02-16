@@ -1,4 +1,4 @@
-FROM amazonlinux:2
+FROM amazonlinux:2.0.20191217.0
 WORKDIR /root/monadoc
 ENV monadoc_datadir /root/monadoc/data
 EXPOSE 8080
