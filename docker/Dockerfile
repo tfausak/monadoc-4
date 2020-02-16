@@ -7,7 +7,7 @@ RUN \
   yum install --assumeyes gmp-devel postgresql-devel && \
   yum clean all && \
   rm --recursive /var/cache/yum
-ADD monadoc .
+ADD . .
 ARG COMMIT
 ENV monadoc_commit $COMMIT
 CMD /root/monadoc/monadoc
