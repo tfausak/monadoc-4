@@ -18,6 +18,9 @@
 # the Secrets Manager. This is not managed by CloudFormation and must be done
 # in the console.
 
+# NOTE: RDS instances take about 10 minutes to come up. Also they require a
+# master username and password to be stored in the Secrets Manager.
+
 Parameters:
 
   ApexDomain:
@@ -341,6 +344,34 @@ Resources:
       HostedZoneId: !Ref HostedZone
       Name: !Ref ApexDomain
       Type: A
+
+  DatabaseSubnetGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbsubnet-group.html
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: both private subnets
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  Database: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-rds-database-instance.html
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      AvailabilityZone: us-east-1a
+      BackupRetentionPeriod: 7
+      DBInstanceClass: db.t3.micro
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: postgres
+      EngineVersion: 11.6
+      MasterUsername: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterUsername}}'
+      MasterUserPassword: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterPassword}}'
+      MonitoringInterval: 60
+      # TODO: Manage this service role in CloudFormation.
+      MonitoringRoleArn: arn:aws:iam::014479108335:role/rds-monitoring-role
+      StorageEncrypted: true
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !Ref SecurityGroup
 
   Repository: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ecr-repository.html
     Type: AWS::ECR::Repository
