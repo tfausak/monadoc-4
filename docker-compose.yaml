@@ -15,12 +15,26 @@ services:
       - $PWD:$PWD
     working_dir: $PWD
 
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: postgres
+    image: postgres:11.6
+    ports:
+      - 5432
+    volumes:
+      - /var/lib/postgresql/data
+
   stack:
     build:
       context: docker
       dockerfile: stack.docker
     command: sh -c 'stack --version && exec tail -f /dev/null'
     environment:
+      PGDATABASE: postgres
+      PGHOST: postgres
+      PGPASSWORD: postgres
+      PGPORT: 5432
+      PGUSER: postgres
       STACK_ROOT: $PWD/.stack/root
       STACK_WORK: .stack/work
     init: true

@@ -430,6 +430,17 @@ Resources:
         - Environment:
             - Name: monadoc_port
               Value: !Ref Port
+            - Name: PGDATABASE
+              Value: postgres
+            - Name: PGHOST
+              Value: !GetAtt Database.Endpoint.Address
+            - Name: PGPASSWORD
+              Value: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterPassword}}'
+            - Name: PGPORT
+              Value: !GetAtt Database.Endpoint.Port
+            # TODO: Use a different PostgreSQL user.
+            - Name: PGUSER
+              Value: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterUsername}}'
           Essential: true
           Image: !Sub '${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/${Repository}:${Commit}'
           LogConfiguration:

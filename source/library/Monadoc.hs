@@ -18,6 +18,7 @@ import qualified Data.Text.Encoding.Error as Text
 import qualified Data.Text.IO as Text
 import qualified Data.Time as Time
 import qualified Data.Version as Version
+import qualified Database.PostgreSQL.Simple as Sql
 import qualified Lucid
 import qualified Network.HTTP.Types as Http
 import qualified Network.HTTP.Types.Header as Http
@@ -34,6 +35,13 @@ main = do
   maybeCommit <- getCommit
   say $ Text.unwords
     ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
+
+  do
+    connection <- Sql.connectPostgreSQL ByteString.empty
+    rows <- Sql.query_ connection "select 1"
+    say . Text.pack $ show (rows :: [Sql.Only Int])
+    Sql.close connection
+
   Warp.runSettings (settings maybeCommit) . middleware $ application
     maybeCommit
 
