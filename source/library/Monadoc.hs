@@ -241,6 +241,10 @@ application maybeCommit _ request respond =
             [ Lucid.name_ "viewport"
             , Lucid.content_ "initial-scale = 1, width = device-width"
             ]
+          Lucid.meta_
+            [ Lucid.name_ "description"
+            , Lucid.content_ "\x1f3f7 Better Haskell documentation."
+            ]
           Lucid.title_ "Monadoc"
           Lucid.link_
             [ Lucid.rel_ "stylesheet"
