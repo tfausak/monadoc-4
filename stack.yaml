@@ -1,2 +1,2 @@
-resolver: lts-14.24
+resolver: lts-15.0
 allow-different-user: true

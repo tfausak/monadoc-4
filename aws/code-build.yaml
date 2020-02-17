@@ -18,8 +18,8 @@ phases:
         fi
       - if test ! -f ~/.ghcup/bin/ghc;
         then
-        ghcup install 8.6.5 &&
-        ghcup set 8.6.5;
+        ghcup install 8.8.2 &&
+        ghcup set 8.8.2;
         fi
       - if test ! -f ~/.ghcup/bin/cabal;
         then
