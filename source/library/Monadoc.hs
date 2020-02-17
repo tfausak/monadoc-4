@@ -10,8 +10,10 @@ import Data.Function ((&))
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
 import qualified Crypto.Hash as Crypto
+import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
+import qualified Data.Fixed as Fixed
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -20,6 +22,8 @@ import qualified Data.Text.IO as Text
 import qualified Data.Time as Time
 import qualified Data.Version as Version
 import qualified Database.PostgreSQL.Simple as Sql
+import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
+import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Lucid
 import qualified Network.HTTP.Types as Http
 import qualified Network.HTTP.Types.Header as Http
@@ -78,12 +82,90 @@ runMigrations connection = do
   mapM_ (runMigration connection) migrations
 
 
-runMigration :: Sql.Connection -> (Time.UTCTime, Sql.Query) -> IO ()
-runMigration _ _ = pure ()
+runMigration :: Sql.Connection -> Migration -> IO ()
+runMigration connection (time, migration) = do
+  actualDigest <- fmap makeDigest $ Sql.formatQuery connection migration ()
+  rows <- Sql.query
+    connection
+    "select digest from migrations where time = ?"
+    [time]
+  case rows of
+    [] -> do
+      Monad.void $ Sql.execute_ connection migration
+      Monad.void $ Sql.execute
+        connection
+        "insert into migrations (time, digest) values (?, ?)"
+        (time, actualDigest)
+    Sql.Only expectedDigest : _ ->
+      Monad.when (actualDigest /= expectedDigest)
+        . Exception.throwIO
+        $ MigrationDigestMismatch time expectedDigest actualDigest
 
 
 migrations :: [(Time.UTCTime, Sql.Query)]
-migrations = []
+migrations =
+  [ makeMigration
+      (2020, 2, 16, 9, 14, 0)
+      "create table blobs (\
+      \digest bytea primary key, \
+      \size integer not null, \
+      \content bytea not null)"
+  ]
+
+
+type Migration = (Time.UTCTime, Sql.Query)
+
+
+makeMigration
+  :: (Integer, Int, Int, Int, Int, Fixed.Pico)
+  -> Sql.Query
+  -> (Time.UTCTime, Sql.Query)
+makeMigration (year, month, day, hour, minute, second) query =
+  ( Time.UTCTime
+    { Time.utctDay = Time.fromGregorian year month day
+    , Time.utctDayTime = Time.timeOfDayToTime Time.TimeOfDay
+      { Time.todHour = hour
+      , Time.todMin = minute
+      , Time.todSec = second
+      }
+    }
+  , query
+  )
+
+
+data MigrationDigestMismatch
+  = MigrationDigestMismatch Time.UTCTime Digest Digest
+  deriving (Eq, Show)
+
+
+instance Exception.Exception MigrationDigestMismatch
+
+
+newtype Digest = Digest
+  { unwrapDigest :: Crypto.Digest Crypto.SHA256
+  } deriving (Eq, Show)
+
+
+instance Sql.FromField Digest where
+  fromField field maybeByteString = do
+    binary <- Sql.fromField field maybeByteString
+    let _ = binary :: Sql.Binary ByteString.ByteString
+    case Crypto.digestFromByteString $ Sql.fromBinary binary of
+      Nothing -> Sql.returnError Sql.ConversionFailed field "invalid digest"
+      Just digest -> pure $ Digest digest
+
+
+instance Sql.ToField Digest where
+  toField =
+    Sql.toField
+      . Sql.Binary
+      . (\byteString -> byteString :: ByteString.ByteString)
+      . ByteArray.convert
+      . unwrapDigest
+
+
+makeDigest :: ByteString.ByteString -> Digest
+makeDigest = Digest . Crypto.hash
 
 
 settings :: Maybe Text.Text -> Warp.Settings
