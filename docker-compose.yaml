@@ -4,7 +4,7 @@ services:
   aws:
     build:
       context: docker
-      dockerfile: aws.docker
+      dockerfile: aws.Dockerfile
     command: sh -c 'aws --version && exec tail -f /dev/null'
     environment:
       AWS_ACCESS_KEY_ID: null
@@ -27,7 +27,7 @@ services:
   stack:
     build:
       context: docker
-      dockerfile: stack.docker
+      dockerfile: stack.Dockerfile
     command: sh -c 'stack --version && exec tail -f /dev/null'
     environment:
       PGDATABASE: postgres
