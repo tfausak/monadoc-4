@@ -8,6 +8,7 @@ where
 import Data.Function ((&))
 
 import qualified Control.Exception as Exception
+import qualified Control.Monad as Monad
 import qualified Crypto.Hash as Crypto
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
@@ -35,15 +36,11 @@ main = do
   maybeCommit <- getCommit
   say $ Text.unwords
     ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
-
-  do
-    connection <- Sql.connectPostgreSQL ByteString.empty
-    rows <- Sql.query_ connection "select 1"
-    say . Text.pack $ show (rows :: [Sql.Only Int])
-    Sql.close connection
-
-  Warp.runSettings (settings maybeCommit) . middleware $ application
-    maybeCommit
+  withConnection $ \connection -> do
+    runMigrations connection
+    Warp.runSettings (settings maybeCommit) . middleware $ application
+      maybeCommit
+      connection
 
 
 say :: Text.Text -> IO ()
@@ -64,6 +61,29 @@ getCommit = fmap (fmap Text.pack) $ Environment.lookupEnv "monadoc_commit"
 
 version :: Text.Text
 version = Text.pack $ Version.showVersion Package.version
+
+
+withConnection :: (Sql.Connection -> IO a) -> IO a
+withConnection =
+  Exception.bracket (Sql.connectPostgreSQL ByteString.empty) Sql.close
+
+
+runMigrations :: Sql.Connection -> IO ()
+runMigrations connection = do
+  Monad.void $ Sql.execute_
+    connection
+    "create table if not exists migrations (\
+    \time timestamp primary key, \
+    \digest bytea not null)"
+  mapM_ (runMigration connection) migrations
+
+
+runMigration :: Sql.Connection -> (Time.UTCTime, Sql.Query) -> IO ()
+runMigration _ _ = pure ()
+
+
+migrations :: [(Time.UTCTime, Sql.Query)]
+migrations = []
 
 
 settings :: Maybe Text.Text -> Warp.Settings
@@ -126,8 +146,8 @@ handleEtag handle request respond = handle request $ \response ->
     _ -> response
 
 
-application :: Maybe Text.Text -> Wai.Application
-application maybeCommit request respond =
+application :: Maybe Text.Text -> Sql.Connection -> Wai.Application
+application maybeCommit _ request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
     ("GET", []) -> respond . htmlResponse $ do
