@@ -10,7 +10,6 @@ cache:
 phases:
   install:
     commands:
-      - yum update --assumeyes
       - yum install --assumeyes gcc gmp-devel gzip make ncurses-devel perl postgresql-devel tar xz zlib-devel
       - if test ! -f /usr/local/bin/ghcup; then
         curl --output /usr/local/bin/ghcup https://gitlab.haskell.org/haskell/ghcup/uploads/9f278318810f652a59b1784c2295fa91/ghcup &&
