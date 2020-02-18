@@ -42,9 +42,8 @@ main = do
     ["monadoc", version, Maybe.fromMaybe "unknown" $ configCommit config]
   withConnection $ \connection -> do
     runMigrations connection
-    Warp.runSettings (settings config) . middleware $ application
-      config
-      connection
+    let context = makeContext config connection
+    Warp.runSettings (settings config) . middleware $ application context
 
 
 say :: Text.Text -> IO ()
@@ -81,6 +80,17 @@ version = Text.pack $ Version.showVersion Package.version
 withConnection :: (Sql.Connection -> IO a) -> IO a
 withConnection =
   Exception.bracket (Sql.connectPostgreSQL ByteString.empty) Sql.close
+
+
+data Context = Context
+  { contextConfig :: Config
+  , contextConnection :: Sql.Connection
+  } deriving (Eq)
+
+
+makeContext :: Config -> Sql.Connection -> Context
+makeContext config connection =
+  Context { contextConfig = config, contextConnection = connection }
 
 
 runMigrations :: Sql.Connection -> IO ()
@@ -247,8 +257,8 @@ handleEtag handle request respond = handle request $ \response ->
     _ -> response
 
 
-application :: Config -> Sql.Connection -> Wai.Application
-application config _ request respond =
+application :: Context -> Wai.Application
+application context request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
     ("GET", []) -> respond . htmlResponse $ do
@@ -294,7 +304,7 @@ application config _ request respond =
                     <> version
                     ]
                   $ Lucid.toHtml version
-                case configCommit config of
+                case configCommit $ contextConfig context of
                   Nothing -> "."
                   Just commit -> do
                     " commit "
