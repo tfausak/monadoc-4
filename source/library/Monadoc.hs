@@ -79,11 +79,13 @@ runMigrations connection = do
     "select count(*) from pg_tables where tablename = 'migrations'"
   case rows of
     [Sql.Only count] | count == (1 :: Int) -> pure ()
-    _ -> Monad.void $ Sql.execute_
-      connection
-      "create table migrations (\
-      \time timestamp primary key, \
-      \digest bytea not null)"
+    _ -> do
+      say "creating migration table"
+      Monad.void $ Sql.execute_
+        connection
+        "create table migrations (\
+        \time timestamp primary key, \
+        \digest bytea not null)"
   mapM_ (runMigration connection) migrations
 
 
@@ -96,6 +98,7 @@ runMigration connection (time, migration) = do
     [time]
   case rows of
     [] -> do
+      say $ "running migration " <> formatTime time
       Monad.void $ Sql.execute_ connection migration
       Monad.void $ Sql.execute
         connection
