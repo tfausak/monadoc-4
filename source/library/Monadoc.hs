@@ -37,13 +37,13 @@ import qualified System.IO as IO
 main :: IO ()
 main = do
   say "starting up"
-  maybeCommit <- getCommit
+  config <- getConfig
   say $ Text.unwords
-    ["monadoc", version, Maybe.fromMaybe "unknown" maybeCommit]
+    ["monadoc", version, Maybe.fromMaybe "unknown" $ configCommit config]
   withConnection $ \connection -> do
     runMigrations connection
-    Warp.runSettings (settings maybeCommit) . middleware $ application
-      maybeCommit
+    Warp.runSettings (settings config) . middleware $ application
+      config
       connection
 
 
@@ -57,6 +57,17 @@ say message = do
 formatTime :: Time.UTCTime -> Text.Text
 formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
+
+
+newtype Config = Config
+  { configCommit :: Maybe Text.Text
+  } deriving (Eq, Show)
+
+
+getConfig :: IO Config
+getConfig = do
+  commit <- getCommit
+  pure Config { configCommit = commit }
 
 
 getCommit :: IO (Maybe Text.Text)
@@ -176,15 +187,15 @@ makeDigest :: ByteString.ByteString -> Digest
 makeDigest = Digest . Crypto.hash
 
 
-settings :: Maybe Text.Text -> Warp.Settings
-settings maybeCommit =
+settings :: Config -> Warp.Settings
+settings config =
   Warp.defaultSettings
     & Warp.setBeforeMainLoop beforeMainLoop
     & Warp.setHost host
     & Warp.setLogger logger
     & Warp.setOnExceptionResponse onExceptionResponse
     & Warp.setPort port
-    & Warp.setServerName (makeServerName maybeCommit)
+    & Warp.setServerName (makeServerName config)
 
 
 beforeMainLoop :: IO ()
@@ -214,9 +225,9 @@ port :: Warp.Port
 port = 8080
 
 
-makeServerName :: Maybe Text.Text -> ByteString.ByteString
-makeServerName maybeCommit =
-  Text.encodeUtf8 . Text.concat $ case maybeCommit of
+makeServerName :: Config -> ByteString.ByteString
+makeServerName config =
+  Text.encodeUtf8 . Text.concat $ case configCommit config of
     Nothing -> ["monadoc-", version]
     Just commit -> ["monadoc-", version, "+", commit]
 
@@ -236,8 +247,8 @@ handleEtag handle request respond = handle request $ \response ->
     _ -> response
 
 
-application :: Maybe Text.Text -> Sql.Connection -> Wai.Application
-application maybeCommit _ request respond =
+application :: Config -> Sql.Connection -> Wai.Application
+application config _ request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
     ("GET", []) -> respond . htmlResponse $ do
@@ -283,7 +294,7 @@ application maybeCommit _ request respond =
                     <> version
                     ]
                   $ Lucid.toHtml version
-                case maybeCommit of
+                case configCommit config of
                   Nothing -> "."
                   Just commit -> do
                     " commit "
