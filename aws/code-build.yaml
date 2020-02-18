@@ -10,21 +10,15 @@ cache:
 phases:
   install:
     commands:
-      - yum install --assumeyes gmp-devel
-      - if test ! -f /usr/local/bin/ghcup;
-        then
+      - yum install --assumeyes gcc gmp-devel gzip make ncurses-devel perl postgresql-devel tar xz zlib-devel
+      - if test ! -f /usr/local/bin/ghcup; then
         curl --output /usr/local/bin/ghcup https://gitlab.haskell.org/haskell/ghcup/uploads/9f278318810f652a59b1784c2295fa91/ghcup &&
-        chmod +x /usr/local/bin/ghcup;
-        fi
-      - if test ! -f ~/.ghcup/bin/ghc;
-        then
-        ghcup install 8.6.5 &&
-        ghcup set 8.6.5;
-        fi
-      - if test ! -f ~/.ghcup/bin/cabal;
-        then
-        ghcup install-cabal 3.0.0.0;
-        fi
+        chmod +x /usr/local/bin/ghcup; fi
+      - if test ! -f ~/.ghcup/bin/ghc; then
+        ghcup install 8.8.2 &&
+        ghcup set 8.8.2; fi
+      - if test ! -f ~/.ghcup/bin/cabal; then
+        ghcup install-cabal 3.0.0.0; fi
   pre_build:
     commands:
       - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
@@ -42,8 +36,9 @@ phases:
       - ( cd docker && docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --file ecs.Dockerfile --tag "$tag" . )
   post_build:
     commands:
-      - aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc || docker push "$tag" || true
-      - 'echo "{ \"Parameters\": { \"Commit\": \"$CODEBUILD_RESOLVED_SOURCE_VERSION\" } }" | tee aws/configuration.json'
+      - if ! aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc; then
+        docker push "$tag"; fi
+      - printf '{"Parameters":{"Commit":"%s"}}\n' "$CODEBUILD_RESOLVED_SOURCE_VERSION" | tee aws/configuration.json
 
 artifacts:
   files:

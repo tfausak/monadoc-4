@@ -241,20 +241,24 @@ application maybeCommit _ request respond =
             [ Lucid.name_ "viewport"
             , Lucid.content_ "initial-scale = 1, width = device-width"
             ]
+          Lucid.meta_
+            [ Lucid.name_ "description"
+            , Lucid.content_ "\x1f3f7 Better Haskell documentation."
+            ]
           Lucid.title_ "Monadoc"
           Lucid.link_
             [ Lucid.rel_ "stylesheet"
             , Lucid.href_ "/static/tachyons-4-11-2.css"
             ]
         Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-          Lucid.div_ [Lucid.class_ "bg-purple pa3 white"]
+          Lucid.header_ [Lucid.class_ "bg-purple pa3 white"]
             . Lucid.h1_ [Lucid.class_ "ma0 normal"]
             $ Lucid.a_
                 [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
                 "Monadoc"
-          Lucid.div_ [Lucid.class_ "pa3"]
+          Lucid.main_ [Lucid.class_ "pa3"]
             $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
-          Lucid.div_ [Lucid.class_ "mid-gray pa3 tc"]
+          Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
             . Lucid.p_ [Lucid.class_ "ma0"]
             $ do
                 "Powered by "
