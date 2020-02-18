@@ -74,11 +74,16 @@ withConnection =
 
 runMigrations :: Sql.Connection -> IO ()
 runMigrations connection = do
-  Monad.void $ Sql.execute_
+  rows <- Sql.query_
     connection
-    "create table if not exists migrations (\
-    \time timestamp primary key, \
-    \digest bytea not null)"
+    "select count(*) from pg_tables where tablename = 'migrations'"
+  case rows of
+    [Sql.Only count] | count == (1 :: Int) -> pure ()
+    _ -> Monad.void $ Sql.execute_
+      connection
+      "create table migrations (\
+      \time timestamp primary key, \
+      \digest bytea not null)"
   mapM_ (runMigration connection) migrations
 
 
