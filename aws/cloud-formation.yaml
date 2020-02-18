@@ -428,6 +428,10 @@ Resources:
     Properties:
       ContainerDefinitions:
         - Environment:
+            - Name: monadoc_client_id
+              Value: '{{resolve:secretsmanager:GitHub:SecretString:ClientId}}'
+            - Name: monadoc_client_secret
+              Value: '{{resolve:secretsmanager:GitHub:SecretString:ClientSecret}}'
             - Name: monadoc_port
               Value: !Ref Port
             - Name: PGDATABASE

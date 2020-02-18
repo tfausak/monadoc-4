@@ -10,6 +10,8 @@ import Data.Function ((&))
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
 import qualified Crypto.Hash as Crypto
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
@@ -25,8 +27,11 @@ import qualified Database.PostgreSQL.Simple as Sql
 import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
 import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Lucid
+import qualified Network.HTTP.Client as Client
+import qualified Network.HTTP.Client.TLS as Tls
 import qualified Network.HTTP.Types as Http
 import qualified Network.HTTP.Types.Header as Http
+import qualified Network.URI as Uri
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Paths_monadoc as Package
@@ -42,7 +47,7 @@ main = do
     ["monadoc", version, Maybe.fromMaybe "unknown" $ configCommit config]
   withConnection $ \connection -> do
     runMigrations connection
-    let context = makeContext config connection
+    context <- makeContext config connection
     Warp.runSettings (settings config) . middleware $ application context
 
 
@@ -58,15 +63,31 @@ formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
 
 
-newtype Config = Config
-  { configCommit :: Maybe Text.Text
+data Config = Config
+  { configClientId :: Text.Text
+  , configClientSecret :: Text.Text
+  , configCommit :: Maybe Text.Text
   } deriving (Eq, Show)
 
 
 getConfig :: IO Config
 getConfig = do
+  clientId <- getClientId
+  clientSecret <- getClientSecret
   commit <- getCommit
-  pure Config { configCommit = commit }
+  pure Config
+    { configClientId = clientId
+    , configClientSecret = clientSecret
+    , configCommit = commit
+    }
+
+
+getClientId :: IO Text.Text
+getClientId = fmap Text.pack $ Environment.getEnv "monadoc_client_id"
+
+
+getClientSecret :: IO Text.Text
+getClientSecret = fmap Text.pack $ Environment.getEnv "monadoc_client_secret"
 
 
 getCommit :: IO (Maybe Text.Text)
@@ -85,12 +106,18 @@ withConnection =
 data Context = Context
   { contextConfig :: Config
   , contextConnection :: Sql.Connection
-  } deriving (Eq)
+  , contextManager :: Client.Manager
+  }
 
 
-makeContext :: Config -> Sql.Connection -> Context
-makeContext config connection =
-  Context { contextConfig = config, contextConnection = connection }
+makeContext :: Config -> Sql.Connection -> IO Context
+makeContext config connection = do
+  manager <- Tls.newTlsManager
+  pure Context
+    { contextConfig = config
+    , contextConnection = connection
+    , contextManager = manager
+    }
 
 
 runMigrations :: Sql.Connection -> IO ()
@@ -332,7 +359,82 @@ application context request respond =
       response <- fileResponse "text/css" "tachyons-4-11-2.css"
       respond response
 
+    ("GET", ["github-callback"]) ->
+      case lookup "code" $ Wai.queryString request of
+        Just (Just code) -> do
+          token <- do
+            req <- Client.parseUrlThrow
+              "https://github.com/login/oauth/access_token"
+            res <- performRequest
+              context
+              req
+                { Client.method = Http.methodPost
+                , Client.requestBody =
+                  Client.RequestBodyLBS . Aeson.encode $ Aeson.object
+                    [ jsonPair "client_id" . configClientId $ contextConfig
+                      context
+                    , jsonPair "client_secret"
+                    . configClientSecret
+                    $ contextConfig context
+                    , jsonPair "code"
+                      $ Text.decodeUtf8With Text.lenientDecode code
+                    ]
+                , Client.requestHeaders =
+                  [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
+                }
+            payload <-
+              either fail pure . Aeson.eitherDecode $ Client.responseBody res
+            pure $ gitHubPayloadAccessToken payload
+          -- TODO: Make a request to GET https://api.github.com/user with the
+          -- Authorization header set to "Bearer $token". Grab the "login"
+          -- field from the JSON response. Store the login and the token in the
+          -- database. Return a 302 request to whichever page the user was on.
+          -- Add a Set-Cookie header to the response.
+          undefined token
+        _ -> respond $ statusResponse Http.badRequest400
+
     _ -> respond $ statusResponse Http.notFound404
+
+
+newtype GitHubPayload = GitHubPayload
+  { gitHubPayloadAccessToken :: Text.Text
+  } deriving (Eq, Show)
+
+
+instance Aeson.FromJSON GitHubPayload where
+  parseJSON = Aeson.withObject "GitHubPayload" $ \object -> do
+    accessToken <- requiredJsonKey object "access_token"
+    pure GitHubPayload { gitHubPayloadAccessToken = accessToken }
+
+
+requiredJsonKey
+  :: Aeson.FromJSON v => Aeson.Object -> Text.Text -> Aeson.Parser v
+requiredJsonKey = (Aeson..:)
+
+
+jsonPair :: (Aeson.ToJSON v, Aeson.KeyValue p) => Text.Text -> v -> p
+jsonPair = (Aeson..=)
+
+
+jsonMime :: ByteString.ByteString
+jsonMime = "application/json"
+
+
+performRequest
+  :: Context
+  -> Client.Request
+  -> IO (Client.Response LazyByteString.ByteString)
+performRequest context request = do
+  let
+    method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
+    url = Text.pack $ Uri.uriToString id (Client.getUri request) ""
+  say $ Text.unwords [method, url]
+  response <- Client.httpLbs request $ contextManager context
+  let
+    status =
+      Text.pack . show . Http.statusCode $ Client.responseStatus response
+  say $ Text.unwords [method, url, status]
+  pure response
 
 
 fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
