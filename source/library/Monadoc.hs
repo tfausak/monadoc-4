@@ -376,29 +376,49 @@ application context request respond =
                 , Client.requestHeaders =
                   [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
                 }
-            either fail (pure . gitHubPayloadAccessToken)
+            either fail (pure . gitHubOAuthAccessToken)
               . Aeson.eitherDecode
               $ Client.responseBody res
-          -- TODO: Make a request to GET https://api.github.com/user with the
-          -- Authorization header set to "Bearer $token". Grab the "login"
-          -- field from the JSON response. Store the login and the token in the
-          -- database. Return a 302 request to whichever page the user was on.
-          -- Add a Set-Cookie header to the response.
-          undefined token
+          login <- do
+            req <- Client.parseUrlThrow "https://api.github.com/user"
+            res <- performRequest
+              context
+              req
+                { Client.requestHeaders =
+                  [(Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)]
+                }
+            either fail (pure . gitHubUserLogin)
+              . Aeson.eitherDecode
+              $ Client.responseBody res
+          -- TODO: Store the login and the token in the database. Return a 302
+          -- request to whichever page the user was on. Add a Set-Cookie header
+          -- to the response.
+          undefined login
         _ -> respond $ statusResponse Http.badRequest400
 
     _ -> respond $ statusResponse Http.notFound404
 
 
-newtype GitHubPayload = GitHubPayload
-  { gitHubPayloadAccessToken :: Text.Text
+newtype GitHubOAuth = GitHubOAuth
+  { gitHubOAuthAccessToken :: Text.Text
   } deriving (Eq, Show)
 
 
-instance Aeson.FromJSON GitHubPayload where
-  parseJSON = Aeson.withObject "GitHubPayload" $ \object -> do
+instance Aeson.FromJSON GitHubOAuth where
+  parseJSON = Aeson.withObject "GitHubOAuth" $ \object -> do
     accessToken <- requiredJsonKey object "access_token"
-    pure GitHubPayload { gitHubPayloadAccessToken = accessToken }
+    pure GitHubOAuth { gitHubOAuthAccessToken = accessToken }
+
+
+newtype GitHubUser = GitHubUser
+  { gitHubUserLogin :: Text.Text
+  } deriving (Eq, Show)
+
+
+instance Aeson.FromJSON GitHubUser where
+  parseJSON = Aeson.withObject "GitHubUser" $ \object -> do
+    login <- requiredJsonKey object "login"
+    pure GitHubUser { gitHubUserLogin = login }
 
 
 requiredJsonKey
