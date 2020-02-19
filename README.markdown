@@ -1,3 +1,3 @@
 # Monadoc
 
-:label: Better Haskell documentation.
+:bookmark: Better Haskell documentation.

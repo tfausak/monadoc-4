@@ -299,7 +299,7 @@ application context request respond =
             ]
           Lucid.meta_
             [ Lucid.name_ "description"
-            , Lucid.content_ "\x1f3f7 Better Haskell documentation."
+            , Lucid.content_ "\x1f516 Better Haskell documentation."
             ]
           Lucid.title_ "Monadoc"
           Lucid.link_
@@ -313,7 +313,7 @@ application context request respond =
                 [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
                 "Monadoc"
           Lucid.main_ [Lucid.class_ "pa3"]
-            $ Lucid.p_ "\x1f3f7 Better Haskell documentation."
+            $ Lucid.p_ "\x1f516 Better Haskell documentation."
           Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
             . Lucid.p_ [Lucid.class_ "ma0"]
             $ do
@@ -382,9 +382,9 @@ application context request respond =
                 , Client.requestHeaders =
                   [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
                 }
-            payload <-
-              either fail pure . Aeson.eitherDecode $ Client.responseBody res
-            pure $ gitHubPayloadAccessToken payload
+            either fail (pure . gitHubPayloadAccessToken)
+              . Aeson.eitherDecode
+              $ Client.responseBody res
           -- TODO: Make a request to GET https://api.github.com/user with the
           -- Authorization header set to "Bearer $token". Grab the "login"
           -- field from the JSON response. Store the login and the token in the
