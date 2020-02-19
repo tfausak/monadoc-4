@@ -30,8 +30,9 @@ services:
       dockerfile: stack.Dockerfile
     command: sh -c 'stack --version && exec tail -f /dev/null'
     environment:
-      monadoc_client_id: null
+      monadoc_client_id: 235ce8c873f4ed90905c
       monadoc_client_secret: null
+      monadoc_commit: 4837a4e547171997cb289f2e523d79edb602fc71
       PGDATABASE: postgres
       PGHOST: postgres
       PGPASSWORD: postgres

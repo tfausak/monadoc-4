@@ -16,7 +16,6 @@ import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Fixed as Fixed
-import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
@@ -43,8 +42,7 @@ main :: IO ()
 main = do
   say "starting up"
   config <- getConfig
-  say $ Text.unwords
-    ["monadoc", version, Maybe.fromMaybe "unknown" $ configCommit config]
+  say $ Text.unwords ["monadoc", version, configCommit config]
   withConnection $ \connection -> do
     runMigrations connection
     context <- makeContext config connection
@@ -66,7 +64,7 @@ formatTime =
 data Config = Config
   { configClientId :: Text.Text
   , configClientSecret :: Text.Text
-  , configCommit :: Maybe Text.Text
+  , configCommit :: Text.Text
   } deriving (Eq, Show)
 
 
@@ -90,8 +88,8 @@ getClientSecret :: IO Text.Text
 getClientSecret = fmap Text.pack $ Environment.getEnv "monadoc_client_secret"
 
 
-getCommit :: IO (Maybe Text.Text)
-getCommit = fmap (fmap Text.pack) $ Environment.lookupEnv "monadoc_commit"
+getCommit :: IO Text.Text
+getCommit = fmap Text.pack $ Environment.getEnv "monadoc_commit"
 
 
 version :: Text.Text
@@ -264,9 +262,7 @@ port = 8080
 
 makeServerName :: Config -> ByteString.ByteString
 makeServerName config =
-  Text.encodeUtf8 . Text.concat $ case configCommit config of
-    Nothing -> ["monadoc-", version]
-    Just commit -> ["monadoc-", version, "+", commit]
+  Text.encodeUtf8 $ Text.concat ["monadoc-", version, "+", configCommit config]
 
 
 middleware :: Wai.Middleware
@@ -331,19 +327,17 @@ application context request respond =
                     <> version
                     ]
                   $ Lucid.toHtml version
-                case configCommit $ contextConfig context of
-                  Nothing -> "."
-                  Just commit -> do
-                    " commit "
-                    Lucid.a_
-                        [ Lucid.class_ "color-inherit"
-                        , Lucid.href_
-                        $ "https://github.com/tfausak/monadoc/commit/"
-                        <> commit
-                        ]
-                      . Lucid.toHtml
-                      $ Text.take 8 commit
-                    "."
+                " commit "
+                let commit = configCommit $ contextConfig context
+                Lucid.a_
+                    [ Lucid.class_ "color-inherit"
+                    , Lucid.href_
+                    $ "https://github.com/tfausak/monadoc/commit/"
+                    <> commit
+                    ]
+                  . Lucid.toHtml
+                  $ Text.take 7 commit
+                "."
 
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse "image/x-icon" "favicon.ico"
