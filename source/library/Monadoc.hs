@@ -7,6 +7,7 @@ where
 
 import Data.Function ((&))
 
+import qualified Control.Concurrent.STM as Stm
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
 import qualified Crypto.Hash as Crypto
@@ -36,6 +37,7 @@ import qualified Network.Wai.Handler.Warp as Warp
 import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
 import qualified System.IO as IO
+import qualified System.IO.Unsafe as Unsafe
 
 
 main :: IO ()
@@ -52,8 +54,15 @@ main = do
 say :: Text.Text -> IO ()
 say message = do
   now <- Time.getCurrentTime
+  () <- Stm.atomically $ Stm.takeTMVar sayVar
   Text.putStrLn $ formatTime now <> " " <> message
   IO.hFlush IO.stdout
+  Stm.atomically $ Stm.putTMVar sayVar ()
+
+
+sayVar :: Stm.TMVar ()
+sayVar = Unsafe.unsafePerformIO $ Stm.newTMVarIO ()
+{-# NOINLINE sayVar #-}
 
 
 formatTime :: Time.UTCTime -> Text.Text
