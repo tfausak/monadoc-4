@@ -763,11 +763,8 @@ isHttps = Text.isPrefixOf "https:"
 
 
 contentSecurityPolicy :: ByteString.ByteString
-contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
-  "; "
-  [ "default-src 'none'"
-  , "style-src 'self'"
-  ]
+contentSecurityPolicy = Text.encodeUtf8
+  $ Text.intercalate "; " ["default-src 'none'", "style-src 'self'"]
 
 
 featurePolicy :: ByteString.ByteString
