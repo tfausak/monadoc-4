@@ -390,11 +390,28 @@ application context request respond = do
             , Lucid.href_ "/static/tachyons-4-11-2.css"
             ]
         Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-          Lucid.header_ [Lucid.class_ "bg-purple pa3 white"]
-            . Lucid.h1_ [Lucid.class_ "ma0 normal"]
-            $ Lucid.a_
-                [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-                "Monadoc"
+          Lucid.header_
+              [ Lucid.class_
+                  "bg-purple flex items-center justify-between pa3 white"
+              ]
+            $ do
+                Lucid.h1_ [Lucid.class_ "ma0 normal"] $ Lucid.a_
+                  [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
+                  "Monadoc"
+                Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
+                  Nothing -> Lucid.a_
+                    [ Lucid.class_ "color-inherit no-underline"
+                    , Lucid.href_ $ Text.concat
+                      [ "http://github.com/login/oauth/authorize?client_id="
+                      , configClientId $ contextConfig context
+                      , "&redirect_uri="
+                      , configUrl $ contextConfig context
+                      , "/github-callback"
+                      ]
+                    ]
+                    "Log in with GitHub"
+                  Just gitHubUser ->
+                    Lucid.toHtml $ "@" <> gitHubUserLogin gitHubUser
           Lucid.main_ [Lucid.class_ "pa3"]
             $ Lucid.p_ "\x1f516 Better Haskell documentation."
           Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
