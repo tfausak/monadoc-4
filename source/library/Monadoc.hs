@@ -181,7 +181,7 @@ createMigrationTableIfNecessary connection = do
 
 createMigrationTable :: Sql.Connection -> IO ()
 createMigrationTable connection = do
-  say "creating migration table"
+  say "[sql] creating migration table"
   Monad.void $ Sql.execute_
     connection
     "create table migrations (\
@@ -204,7 +204,7 @@ runMigrationIfNecessary connection (time, migration) = do
 
 runMigration :: Sql.Connection -> Time.UTCTime -> Sql.Query -> Digest -> IO ()
 runMigration connection time migration digest = do
-  say $ "running migration " <> formatTime time
+  say $ "[sql] running migration " <> formatTime time
   Monad.void $ Sql.execute_ connection migration
   Monad.void $ Sql.execute
     connection
@@ -320,7 +320,7 @@ settings context =
 
 beforeMainLoop :: Config -> IO ()
 beforeMainLoop config = say $ Text.unwords
-  [ "listening on"
+  [ "[server] listening on"
   , Text.pack $ show host
   , "port"
   , Text.pack . show $ configPort config
@@ -360,7 +360,7 @@ logger handle request respond = do
       status =
         Text.pack . show . Http.statusCode $ Wai.responseStatus response
       duration = Text.pack . Printf.printf "%.3f" $ after - before
-    say $ Text.unwords [method, path, status, duration]
+    say $ Text.unwords ["[server]", method, path, status, duration]
     respond response
 
 
@@ -700,14 +700,14 @@ performRequest context request = do
   let
     method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
     url = Text.pack $ Uri.uriToString id (Client.getUri request) ""
-  say $ Text.unwords [method, url]
+  say $ Text.unwords ["[client]", method, url]
   (response, seconds) <- withDuration . Client.httpLbs request $ contextManager
     context
   let
     status =
       Text.pack . show . Http.statusCode $ Client.responseStatus response
     duration = Text.pack $ Printf.printf "%.3f" seconds
-  say $ Text.unwords [method, url, status, duration]
+  say $ Text.unwords ["[client]", method, url, status, duration]
   pure response
 
 
