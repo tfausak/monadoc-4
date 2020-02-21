@@ -290,7 +290,8 @@ logger request status _ = say $ Text.unwords
 
 
 onExceptionResponse :: Exception.SomeException -> Wai.Response
-onExceptionResponse _ = statusResponse Http.internalServerError500 []
+onExceptionResponse _ =
+  statusResponse Http.internalServerError500 defaultHeaders
 
 
 makeServerName :: Config -> ByteString.ByteString
@@ -309,7 +310,7 @@ handleEtag handle request respond = handle request $ \response ->
     actual = lookup Http.hETag $ Wai.responseHeaders response
   in respond $ case (Wai.requestMethod request, expected, actual) of
     ("GET", Just _, Just _) | expected == actual ->
-      responseBS Http.notModified304 [] ByteString.empty
+      responseBS Http.notModified304 defaultHeaders ByteString.empty
     _ -> response
 
 
@@ -317,7 +318,7 @@ application :: Context -> Wai.Application
 application context request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
-    ("GET", []) -> respond . htmlResponse Http.ok200 [] $ do
+    ("GET", []) -> respond . htmlResponse Http.ok200 defaultHeaders $ do
       Lucid.doctype_
       Lucid.html_ [Lucid.lang_ "en-US"] $ do
         Lucid.head_ $ do
@@ -375,20 +376,21 @@ application context request respond =
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse
         Http.ok200
-        [(Http.hContentType, "image/x-icon")]
+        ((Http.hContentType, "image/x-icon") : defaultHeaders)
         "favicon.ico"
       respond response
 
-    ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 [] ""
+    ("GET", ["health-check"]) ->
+      respond $ textResponse Http.ok200 defaultHeaders ""
 
     ("GET", ["robots.txt"]) ->
-      respond . textResponse Http.ok200 [] $ Text.unlines
+      respond . textResponse Http.ok200 defaultHeaders $ Text.unlines
         ["User-Agent: *", "Disallow:"]
 
     ("GET", ["static", "tachyons-4-11-2.css"]) -> do
       response <- fileResponse
         Http.ok200
-        [(Http.hContentType, "text/css")]
+        ((Http.hContentType, "text/css") : defaultHeaders)
         "tachyons-4-11-2.css"
       respond response
 
@@ -433,9 +435,9 @@ application context request respond =
           -- request to whichever page the user was on. Add a Set-Cookie header
           -- to the response.
           undefined login
-        _ -> respond $ statusResponse Http.badRequest400 []
+        _ -> respond $ statusResponse Http.badRequest400 defaultHeaders
 
-    _ -> respond $ statusResponse Http.notFound404 []
+    _ -> respond $ statusResponse Http.notFound404 defaultHeaders
 
 
 newtype GitHubOAuth = GitHubOAuth
@@ -535,13 +537,18 @@ responseBS status headers strict =
     utf8 = Text.encodeUtf8 . Text.pack . show
     allHeaders =
       (Http.hContentLength, utf8 $ ByteString.length strict)
-        : ("Content-Security-Policy", contentSecurityPolicy)
         : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
-        : ("Referrer-Policy", "no-referrer")
-        : ("X-Content-Type-Options", "nosniff")
-        : ("X-Frame-Options", "deny")
         : headers
   in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
+
+
+defaultHeaders :: Http.ResponseHeaders
+defaultHeaders =
+  [ ("Content-Security-Policy", contentSecurityPolicy)
+  , ("Referrer-Policy", "no-referrer")
+  , ("X-Content-Type-Options", "nosniff")
+  , ("X-Frame-Options", "deny")
+  ]
 
 
 contentSecurityPolicy :: ByteString.ByteString
