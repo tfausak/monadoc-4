@@ -313,7 +313,6 @@ settings context =
   Warp.defaultSettings
     & Warp.setBeforeMainLoop (beforeMainLoop $ contextConfig context)
     & Warp.setHost host
-    & Warp.setLogger logger
     & Warp.setOnExceptionResponse (onExceptionResponse context)
     & Warp.setPort (configPort $ contextConfig context)
     & Warp.setServerName (makeServerName $ contextConfig context)
@@ -332,16 +331,6 @@ host :: Warp.HostPreference
 host = "*"
 
 
-logger :: Wai.Request -> Http.Status -> Maybe Integer -> IO ()
-logger request status _ = say $ Text.unwords
-  [ Text.decodeUtf8With Text.lenientDecode $ Wai.requestMethod request
-  , Text.decodeUtf8With Text.lenientDecode
-  $ Wai.rawPathInfo request
-  <> Wai.rawQueryString request
-  , Text.pack . show $ Http.statusCode status
-  ]
-
-
 onExceptionResponse :: Context -> Exception.SomeException -> Wai.Response
 onExceptionResponse context _ =
   statusResponse Http.internalServerError500 $ defaultHeaders context
@@ -353,7 +342,26 @@ makeServerName config =
 
 
 middleware :: Wai.Middleware
-middleware = handleEtag
+middleware = logger . handleEtag
+
+
+logger :: Wai.Middleware
+logger handle request respond = do
+  before <- Clock.getMonotonicTime
+  handle request $ \response -> do
+    after <- Clock.getMonotonicTime
+    let
+      method =
+        Text.decodeUtf8With Text.lenientDecode $ Wai.requestMethod request
+      path =
+        Text.decodeUtf8With Text.lenientDecode
+          $ Wai.rawPathInfo request
+          <> Wai.rawQueryString request
+      status =
+        Text.pack . show . Http.statusCode $ Wai.responseStatus response
+      duration = Text.pack . Printf.printf "%.3f" $ after - before
+    say $ Text.unwords [method, path, status, duration]
+    respond response
 
 
 getUserFromCookie :: Context -> Wai.Request -> IO (Maybe GitHubUser)
