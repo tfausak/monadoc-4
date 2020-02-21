@@ -28,6 +28,7 @@ import qualified Data.Version as Version
 import qualified Database.PostgreSQL.Simple as Sql
 import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
 import qualified Database.PostgreSQL.Simple.ToField as Sql
+import qualified Database.PostgreSQL.Simple.ToRow as Sql
 import qualified Lucid
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.TLS as Tls
@@ -480,7 +481,11 @@ application context request respond =
             "insert into github_users (login, token, guid) values (?, ?, ?) \
             \on conflict (login) do update set token = excluded.token \
             \returning guid"
-            (login, token, randomUuid)
+            GitHubUser
+              { gitHubUserGuid = randomUuid
+              , gitHubUserLogin = login
+              , gitHubUserToken = token
+              }
           -- TODO: Redirect to where the user wanted to go.
           respond
             . statusResponse Http.found302
@@ -494,6 +499,21 @@ application context request respond =
           respond . statusResponse Http.badRequest400 $ defaultHeaders context
 
     _ -> respond . statusResponse Http.notFound404 $ defaultHeaders context
+
+
+data GitHubUser = GitHubUser
+  { gitHubUserGuid :: Uuid.UUID
+  , gitHubUserLogin :: Text.Text
+  , gitHubUserToken :: Text.Text
+  } deriving (Eq, Show)
+
+
+instance Sql.ToRow GitHubUser where
+  toRow gitHubUser =
+    [ Sql.toField $ gitHubUserLogin gitHubUser
+    , Sql.toField $ gitHubUserToken gitHubUser
+    , Sql.toField $ gitHubUserGuid gitHubUser
+    ]
 
 
 newtype GitHubOAuth = GitHubOAuth
