@@ -756,7 +756,7 @@ defaultHeaders context =
 strictTransportSecurity :: Context -> ByteString.ByteString
 strictTransportSecurity context =
   if isHttps . configUrl $ contextConfig context
-    then "max-age=86400"
+    then "max-age=2592000"
     else "max-age=0"
 
 
