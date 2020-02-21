@@ -34,6 +34,7 @@ services:
       monadoc_client_secret: null
       monadoc_commit: 4837a4e547171997cb289f2e523d79edb602fc71
       monadoc_port: 8080
+      monadoc_url: http://localhost:8080
       PGDATABASE: postgres
       PGHOST: postgres
       PGPASSWORD: postgres
@@ -43,7 +44,7 @@ services:
       STACK_WORK: .stack/work
     init: true
     ports:
-      - 8080
+      - 8080:8080
     volumes:
       - $PWD:$PWD
     working_dir: $PWD

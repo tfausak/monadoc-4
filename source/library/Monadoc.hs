@@ -76,6 +76,7 @@ data Config = Config
   , configClientSecret :: Text.Text
   , configCommit :: Text.Text
   , configPort :: Warp.Port
+  , configUrl :: Text.Text
   } deriving (Eq, Show)
 
 
@@ -85,11 +86,13 @@ getConfig = do
   clientSecret <- getClientSecret
   commit <- getCommit
   port <- getPort
+  url <- getUrl
   pure Config
     { configClientId = clientId
     , configClientSecret = clientSecret
     , configCommit = commit
     , configPort = port
+    , configUrl = url
     }
 
 
@@ -112,6 +115,10 @@ getPort = do
   case Read.readEither string of
     Left message -> fail $ mconcat [name, ": invalid value (", message, ")"]
     Right port -> pure port
+
+
+getUrl :: IO Text.Text
+getUrl = getEnv "monadoc_url"
 
 
 getEnv :: Text.Text -> IO Text.Text

@@ -436,6 +436,8 @@ Resources:
               Value: !Ref Commit
             - Name: monadoc_port
               Value: !Ref Port
+            - Name: monadoc_url
+              Value: !Sub 'https://${WwwDomain}'
             - Name: PGDATABASE
               Value: postgres
             - Name: PGHOST
