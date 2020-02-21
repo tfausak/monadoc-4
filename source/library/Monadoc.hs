@@ -41,6 +41,7 @@ import qualified System.Environment as Environment
 import qualified System.IO as IO
 import qualified System.IO.Unsafe as Unsafe
 import qualified Text.Read as Read
+import qualified Web.Cookie as Cookie
 
 
 main :: IO ()
@@ -309,7 +310,37 @@ makeServerName config =
 
 
 middleware :: Context -> Wai.Middleware
-middleware = handleEtag
+middleware context = handleEtag context . handleCookie context
+
+
+handleCookie :: Context -> Wai.Middleware
+handleCookie context handle request respond =
+  case lookup Http.hCookie $ Wai.requestHeaders request of
+    Nothing -> handle request respond
+    Just byteString ->
+      case lookup "guid" $ Cookie.parseCookiesText byteString of
+        Nothing -> handle request respond
+        Just text -> case Uuid.fromText text of
+          Nothing -> handle request respond
+          Just guid -> do
+            [Sql.Only count] <- Sql.query
+              (contextConnection context)
+              "select count(*) from github_users where guid = ?"
+              [guid]
+            if count /= (1 :: Int)
+              then handle request respond
+              else handle request $ \response ->
+                respond $ Wai.mapResponseHeaders
+                  (( Http.hSetCookie
+                   , Text.encodeUtf8
+                     $ Text.concat
+                         [ "guid="
+                         , Uuid.toText guid
+                         , "; HttpOnly; SameSite=Strict"
+                         ]
+                   ) :
+                  )
+                  response
 
 
 handleEtag :: Context -> Wai.Middleware
