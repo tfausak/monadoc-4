@@ -524,16 +524,21 @@ responseBS status headers strict =
     utf8 = Text.encodeUtf8 . Text.pack . show
     allHeaders =
       (Http.hContentLength, utf8 $ ByteString.length strict)
-        : ( "Content-Security-Policy"
-          , "base-uri 'none'; \
-          \default-src 'self'; \
-          \form-action 'self'; \
-          \frame-ancestors 'none'; \
-          \object-src 'none'"
-          )
+        : ("Content-Security-Policy", contentSecurityPolicy)
         : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
         : ("Referrer-Policy", "no-referrer")
         : ("X-Content-Type-Options", "nosniff")
         : ("X-Frame-Options", "deny")
         : headers
   in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
+
+
+contentSecurityPolicy :: ByteString.ByteString
+contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
+  "; "
+  [ "base-uri 'none'"
+  , "default-src 'self'"
+  , "form-action 'self'"
+  , "frame-ancestors 'none'"
+  , "object-src 'none'"
+  ]
