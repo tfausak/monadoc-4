@@ -12,7 +12,7 @@ import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.STM as Stm
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
-import qualified Control.Monad.Trans.Class as Trans
+import qualified Control.Monad.IO.Class as IO
 import qualified Control.Monad.Trans.Reader as Reader
 import qualified Crypto.Hash as Crypto
 import qualified Data.Aeson as Aeson
@@ -64,8 +64,8 @@ main = do
     Async.race_ (runServer context) (runWorker context)
 
 
-say :: Text.Text -> IO ()
-say message = do
+say :: IO.MonadIO m => Text.Text -> m ()
+say message = IO.liftIO $ do
   now <- Time.getCurrentTime
   () <- Stm.atomically $ Stm.takeTMVar sayVar
   Text.putStrLn $ formatTime now <> " " <> message
@@ -170,61 +170,67 @@ type App = Reader.ReaderT Context IO
 
 runMigrations :: App ()
 runMigrations = do
+  createMigrationTableIfNecessary
+  mapM_ runMigrationIfNecessary migrations
+
+
+createMigrationTableIfNecessary :: App ()
+createMigrationTableIfNecessary = do
   connection <- Reader.asks contextConnection
-  Trans.lift $ do
-    createMigrationTableIfNecessary connection
-    mapM_ (runMigrationIfNecessary connection) migrations
-
-
-createMigrationTableIfNecessary :: Sql.Connection -> IO ()
-createMigrationTableIfNecessary connection = do
-  rows <- Sql.query_
+  rows <- IO.liftIO $ Sql.query_
     connection
     "select count(*) from pg_tables where tablename = 'migrations'"
   case rows of
     [Sql.Only count] | count == (1 :: Int) -> pure ()
-    _ -> createMigrationTable connection
+    _ -> createMigrationTable
 
 
-createMigrationTable :: Sql.Connection -> IO ()
-createMigrationTable connection = do
+createMigrationTable :: App ()
+createMigrationTable = do
   say "[sql] creating migration table"
-  Monad.void $ Sql.execute_
+  connection <- Reader.asks contextConnection
+  IO.liftIO . Monad.void $ Sql.execute_
     connection
     "create table migrations (\
     \time timestamp primary key, \
     \digest bytea not null)"
 
 
-runMigrationIfNecessary :: Sql.Connection -> Migration -> IO ()
-runMigrationIfNecessary connection (time, migration) = do
-  actualDigest <- fmap makeDigest $ Sql.formatQuery connection migration ()
-  rows <- Sql.query
+runMigrationIfNecessary :: Migration -> App ()
+runMigrationIfNecessary (time, migration) = do
+  connection <- Reader.asks contextConnection
+  actualDigest <- IO.liftIO . fmap makeDigest $ Sql.formatQuery
+    connection
+    migration
+    ()
+  rows <- IO.liftIO $ Sql.query
     connection
     "select digest from migrations where time = ?"
     [time]
   case rows of
-    [] -> runMigration connection time migration actualDigest
+    [] -> runMigration time migration actualDigest
     Sql.Only expectedDigest : _ ->
       checkMigration time expectedDigest actualDigest
 
 
-runMigration :: Sql.Connection -> Time.UTCTime -> Sql.Query -> Digest -> IO ()
-runMigration connection time migration digest = do
+runMigration :: Time.UTCTime -> Sql.Query -> Digest -> App ()
+runMigration time migration digest = do
   say $ "[sql] running migration " <> formatTime time
-  Monad.void $ Sql.execute_ connection migration
-  Monad.void $ Sql.execute
-    connection
-    "insert into migrations (time, digest) values (?, ?)"
-    (time, digest)
+  connection <- Reader.asks contextConnection
+  IO.liftIO $ do
+    Monad.void $ Sql.execute_ connection migration
+    Monad.void $ Sql.execute
+      connection
+      "insert into migrations (time, digest) values (?, ?)"
+      (time, digest)
 
 
-checkMigration :: Time.UTCTime -> Digest -> Digest -> IO ()
+checkMigration :: IO.MonadIO m => Time.UTCTime -> Digest -> Digest -> m ()
 checkMigration time expected actual =
-  Monad.when (actual /= expected) . Exception.throwIO $ MigrationDigestMismatch
-    time
-    expected
-    actual
+  IO.liftIO
+    . Monad.when (actual /= expected)
+    . Exception.throwIO
+    $ MigrationDigestMismatch time expected actual
 
 
 migrations :: [(Time.UTCTime, Sql.Query)]
