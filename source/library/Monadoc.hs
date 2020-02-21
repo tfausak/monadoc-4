@@ -701,14 +701,12 @@ fileResponse status headers file = do
   pure $ responseBS status headers contents
 
 
-
 htmlResponse
   :: Http.Status -> Http.ResponseHeaders -> Lucid.Html a -> Wai.Response
 htmlResponse status headers =
   responseBS status (replaceHeader (Http.hContentType, htmlMime) headers)
     . LazyByteString.toStrict
     . Lucid.renderBS
-
 
 
 statusResponse :: Http.Status -> Http.ResponseHeaders -> Wai.Response
