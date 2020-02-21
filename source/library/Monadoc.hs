@@ -548,6 +548,7 @@ responseBS status headers strict =
 defaultHeaders :: Context -> Http.ResponseHeaders
 defaultHeaders _ =
   [ ("Content-Security-Policy", contentSecurityPolicy)
+  , ("Feature-Policy", featurePolicy)
   , ("Referrer-Policy", "no-referrer")
   , ("X-Content-Type-Options", "nosniff")
   , ("X-Frame-Options", "deny")
@@ -563,3 +564,9 @@ contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
   , "frame-ancestors 'none'"
   , "object-src 'none'"
   ]
+
+
+featurePolicy :: ByteString.ByteString
+featurePolicy = Text.encodeUtf8 . Text.intercalate "; " $ fmap
+  (<> " 'none'")
+  ["camera", "microphone"]
