@@ -409,8 +409,8 @@ application :: Context -> Wai.Application
 application context request respond = do
   maybeGitHubUser <- getUserFromCookie context request
   let
-    headers =
-      setCookieHeader context maybeGitHubUser <> defaultHeaders context
+    headers = replaceHeaders (setCookieHeader context maybeGitHubUser)
+      $ defaultHeaders context
 
   case (Wai.requestMethod request, Wai.pathInfo request) of
     ("GET", []) ->
@@ -509,7 +509,7 @@ faviconHandler :: Handler
 faviconHandler headers _ respond = do
   response <- fileResponse
     Http.ok200
-    ((Http.hContentType, iconMime) : headers)
+    (replaceHeader (Http.hContentType, iconMime) headers)
     "favicon.ico"
   respond response
 
@@ -529,7 +529,7 @@ tachyonsHandler :: Handler
 tachyonsHandler headers _ respond = do
   response <- fileResponse
     Http.ok200
-    ((Http.hContentType, cssMime) : headers)
+    (replaceHeader (Http.hContentType, cssMime) headers)
     "tachyons-4-11-2.css"
   respond response
 
@@ -565,7 +565,7 @@ gitHubCallbackHandler context headers request respond =
           req
             { Client.requestHeaders =
               [ (Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)
-              , (Http.hUserAgent, Text.encodeUtf8 $ "monadoc-" <> version)
+              , (Http.hUserAgent, makeServerName $ contextConfig context)
               ]
             }
         either fail (pure . gitHubApiLogin)
@@ -588,9 +588,8 @@ gitHubCallbackHandler context headers request respond =
       -- TODO: Redirect to where the user wanted to go.
       respond
         . statusResponse Http.found302
-        $ [(Http.hLocation, "/")]
-        <> setCookieHeader context (Just gitHubUser)
-        <> headers
+        . replaceHeader (Http.hLocation, "/")
+        $ replaceHeaders (setCookieHeader context $ Just gitHubUser) headers
     _ -> respond $ statusResponse Http.badRequest400 headers
 
 
@@ -706,7 +705,7 @@ fileResponse status headers file = do
 htmlResponse
   :: Http.Status -> Http.ResponseHeaders -> Lucid.Html a -> Wai.Response
 htmlResponse status headers =
-  responseBS status ((Http.hContentType, htmlMime) : headers)
+  responseBS status (replaceHeader (Http.hContentType, htmlMime) headers)
     . LazyByteString.toStrict
     . Lucid.renderBS
 
@@ -722,7 +721,8 @@ statusResponse status headers = textResponse status headers $ Text.unwords
 textResponse
   :: Http.Status -> Http.ResponseHeaders -> Text.Text -> Wai.Response
 textResponse status headers =
-  responseBS status ((Http.hContentType, textMime) : headers) . Text.encodeUtf8
+  responseBS status (replaceHeader (Http.hContentType, textMime) headers)
+    . Text.encodeUtf8
 
 
 responseBS
@@ -734,10 +734,11 @@ responseBS status headers strict =
   let
     utf8 :: Show a => a -> ByteString.ByteString
     utf8 = Text.encodeUtf8 . Text.pack . show
-    allHeaders =
-      (Http.hContentLength, utf8 $ ByteString.length strict)
-        : (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
-        : headers
+    allHeaders = replaceHeaders
+      [ (Http.hContentLength, utf8 $ ByteString.length strict)
+      , (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
+      ]
+      headers
   in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
 
 
@@ -776,3 +777,14 @@ featurePolicy :: ByteString.ByteString
 featurePolicy = Text.encodeUtf8 . Text.intercalate "; " $ fmap
   (<> " 'none'")
   ["camera", "microphone"]
+
+
+replaceHeader :: Http.Header -> [Http.Header] -> [Http.Header]
+replaceHeader new headers = case headers of
+  [] -> [new]
+  old : rest ->
+    if fst new == fst old then new : rest else old : replaceHeader new rest
+
+
+replaceHeaders :: [Http.Header] -> [Http.Header] -> [Http.Header]
+replaceHeaders = foldr replaceHeader
