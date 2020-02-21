@@ -768,7 +768,6 @@ contentSecurityPolicy :: ByteString.ByteString
 contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
   "; "
   [ "default-src 'none'"
-  , "require-trusted-types-for 'script'"
   , "style-src 'self'"
   ]
 
