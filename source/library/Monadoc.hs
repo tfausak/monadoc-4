@@ -54,8 +54,7 @@ main = do
   withConnection $ \connection -> do
     runMigrations connection
     context <- makeContext config connection
-    Warp.runSettings (settings context) . middleware context $ application
-      context
+    runServer context
 
 
 say :: Text.Text -> IO ()
@@ -93,6 +92,7 @@ getConfig = do
   commit <- getCommit
   port <- getPort
   url <- getUrl
+
   pure Config
     { configClientId = clientId
     , configClientSecret = clientSecret
@@ -150,6 +150,7 @@ data Context = Context
 makeContext :: Config -> Sql.Connection -> IO Context
 makeContext config connection = do
   manager <- Tls.newTlsManager
+
   pure Context
     { contextConfig = config
     , contextConnection = connection
@@ -159,40 +160,59 @@ makeContext config connection = do
 
 runMigrations :: Sql.Connection -> IO ()
 runMigrations connection = do
+  createMigrationTableIfNecessary connection
+  mapM_ (runMigrationIfNecessary connection) migrations
+
+
+createMigrationTableIfNecessary :: Sql.Connection -> IO ()
+createMigrationTableIfNecessary connection = do
   rows <- Sql.query_
     connection
     "select count(*) from pg_tables where tablename = 'migrations'"
   case rows of
     [Sql.Only count] | count == (1 :: Int) -> pure ()
-    _ -> do
-      say "creating migration table"
-      Monad.void $ Sql.execute_
-        connection
-        "create table migrations (\
-        \time timestamp primary key, \
-        \digest bytea not null)"
-  mapM_ (runMigration connection) migrations
+    _ -> createMigrationTable connection
 
 
-runMigration :: Sql.Connection -> Migration -> IO ()
-runMigration connection (time, migration) = do
+createMigrationTable :: Sql.Connection -> IO ()
+createMigrationTable connection = do
+  say "creating migration table"
+  Monad.void $ Sql.execute_
+    connection
+    "create table migrations (\
+    \time timestamp primary key, \
+    \digest bytea not null)"
+
+
+runMigrationIfNecessary :: Sql.Connection -> Migration -> IO ()
+runMigrationIfNecessary connection (time, migration) = do
   actualDigest <- fmap makeDigest $ Sql.formatQuery connection migration ()
   rows <- Sql.query
     connection
     "select digest from migrations where time = ?"
     [time]
   case rows of
-    [] -> do
-      say $ "running migration " <> formatTime time
-      Monad.void $ Sql.execute_ connection migration
-      Monad.void $ Sql.execute
-        connection
-        "insert into migrations (time, digest) values (?, ?)"
-        (time, actualDigest)
+    [] -> runMigration connection time migration actualDigest
     Sql.Only expectedDigest : _ ->
-      Monad.when (actualDigest /= expectedDigest)
-        . Exception.throwIO
-        $ MigrationDigestMismatch time expectedDigest actualDigest
+      checkMigration time expectedDigest actualDigest
+
+
+runMigration :: Sql.Connection -> Time.UTCTime -> Sql.Query -> Digest -> IO ()
+runMigration connection time migration digest = do
+  say $ "running migration " <> formatTime time
+  Monad.void $ Sql.execute_ connection migration
+  Monad.void $ Sql.execute
+    connection
+    "insert into migrations (time, digest) values (?, ?)"
+    (time, digest)
+
+
+checkMigration :: Time.UTCTime -> Digest -> Digest -> IO ()
+checkMigration time expected actual =
+  Monad.when (actual /= expected) . Exception.throwIO $ MigrationDigestMismatch
+    time
+    expected
+    actual
 
 
 migrations :: [(Time.UTCTime, Sql.Query)]
@@ -220,16 +240,27 @@ makeMigration
   -> Sql.Query
   -> (Time.UTCTime, Sql.Query)
 makeMigration (year, month, day, hour, minute, second) query =
-  ( Time.UTCTime
-    { Time.utctDay = Time.fromGregorian year month day
-    , Time.utctDayTime = Time.timeOfDayToTime Time.TimeOfDay
-      { Time.todHour = hour
-      , Time.todMin = minute
-      , Time.todSec = second
-      }
-    }
-  , query
-  )
+  (makeUtcTime year month day hour minute second, query)
+
+
+makeUtcTime
+  :: Integer -> Int -> Int -> Int -> Int -> Fixed.Pico -> Time.UTCTime
+makeUtcTime year month day hour minute second = Time.UTCTime
+  { Time.utctDay = makeDay year month day
+  , Time.utctDayTime = Time.timeOfDayToTime $ makeTimeOfDay hour minute second
+  }
+
+
+makeDay :: Integer -> Int -> Int -> Time.Day
+makeDay = Time.fromGregorian
+
+
+makeTimeOfDay :: Int -> Int -> Fixed.Pico -> Time.TimeOfDay
+makeTimeOfDay hour minute second = Time.TimeOfDay
+  { Time.todHour = hour
+  , Time.todMin = minute
+  , Time.todSec = second
+  }
 
 
 data MigrationDigestMismatch
@@ -248,8 +279,8 @@ newtype Digest = Digest
 instance Sql.FromField Digest where
   fromField field maybeByteString = do
     binary <- Sql.fromField field maybeByteString
-    let _ = binary :: Sql.Binary ByteString.ByteString
-    case Crypto.digestFromByteString $ Sql.fromBinary binary of
+    let byteString = Sql.fromBinary binary :: ByteString.ByteString
+    case Crypto.digestFromByteString byteString of
       Nothing -> Sql.returnError Sql.ConversionFailed field "invalid digest"
       Just digest -> pure $ Digest digest
 
@@ -265,6 +296,11 @@ instance Sql.ToField Digest where
 
 makeDigest :: ByteString.ByteString -> Digest
 makeDigest = Digest . Crypto.hash
+
+
+runServer :: Context -> IO ()
+runServer context =
+  Warp.runSettings (settings context) . middleware $ application context
 
 
 settings :: Context -> Warp.Settings
@@ -311,7 +347,7 @@ makeServerName config =
   Text.encodeUtf8 $ Text.concat ["monadoc-", version, "+", configCommit config]
 
 
-middleware :: Context -> Wai.Middleware
+middleware :: Wai.Middleware
 middleware = handleEtag
 
 
@@ -340,7 +376,8 @@ setCookieHeader context maybeGitHubUser = case maybeGitHubUser of
   Just gitHubUser ->
     [ ( Http.hSetCookie
       , Text.encodeUtf8 $ Text.concat
-        [ "guid="
+        [ cookieName
+        , "="
         , Uuid.toText $ gitHubUserGuid gitHubUser
         , "; HttpOnly; SameSite=Strict"
         , if isHttps . configUrl $ contextConfig context
@@ -351,14 +388,20 @@ setCookieHeader context maybeGitHubUser = case maybeGitHubUser of
     ]
 
 
-handleEtag :: Context -> Wai.Middleware
-handleEtag context handle request respond = handle request $ \response ->
+cookieName :: Text.Text
+cookieName = "guid"
+
+
+handleEtag :: Wai.Middleware
+handleEtag handle request respond = handle request $ \response ->
   let
     expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
     actual = lookup Http.hETag $ Wai.responseHeaders response
   in respond $ case (Wai.requestMethod request, expected, actual) of
-    ("GET", Just _, Just _) | expected == actual ->
-      responseBS Http.notModified304 (defaultHeaders context) ByteString.empty
+    ("GET", Just _, Just _) | expected == actual -> responseBS
+      Http.notModified304
+      (Wai.responseHeaders response)
+      ByteString.empty
     _ -> response
 
 
@@ -370,161 +413,190 @@ application context request respond = do
       setCookieHeader context maybeGitHubUser <> defaultHeaders context
 
   case (Wai.requestMethod request, Wai.pathInfo request) of
-
-    ("GET", []) -> respond . htmlResponse Http.ok200 headers $ do
-      Lucid.doctype_
-      Lucid.html_ [Lucid.lang_ "en-US"] $ do
-        Lucid.head_ $ do
-          Lucid.meta_ [Lucid.charset_ "utf-8"]
-          Lucid.meta_
-            [ Lucid.name_ "viewport"
-            , Lucid.content_ "initial-scale = 1, width = device-width"
-            ]
-          Lucid.meta_
-            [ Lucid.name_ "description"
-            , Lucid.content_ "\x1f516 Better Haskell documentation."
-            ]
-          Lucid.title_ "Monadoc"
-          Lucid.link_
-            [ Lucid.rel_ "stylesheet"
-            , Lucid.href_ "/static/tachyons-4-11-2.css"
-            ]
-        Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-          Lucid.header_
-              [ Lucid.class_
-                  "bg-purple flex items-center justify-between pa3 white"
-              ]
-            $ do
-                Lucid.h1_ [Lucid.class_ "ma0 normal"] $ Lucid.a_
-                  [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-                  "Monadoc"
-                Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
-                  Nothing -> Lucid.a_
-                    [ Lucid.class_ "color-inherit no-underline"
-                    , Lucid.href_ $ Text.concat
-                      [ "http://github.com/login/oauth/authorize?client_id="
-                      , configClientId $ contextConfig context
-                      , "&redirect_uri="
-                      , configUrl $ contextConfig context
-                      , "/github-callback"
-                      ]
-                    ]
-                    "Log in with GitHub"
-                  Just gitHubUser ->
-                    Lucid.toHtml $ "@" <> gitHubUserLogin gitHubUser
-          Lucid.main_ [Lucid.class_ "pa3"]
-            $ Lucid.p_ "\x1f516 Better Haskell documentation."
-          Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
-            . Lucid.p_ [Lucid.class_ "ma0"]
-            $ do
-                "Powered by "
-                Lucid.a_
-                  [ Lucid.class_ "color-inherit"
-                  , Lucid.href_ "https://github.com/tfausak/monadoc"
-                  ]
-                  "Monadoc"
-                " version "
-                Lucid.a_
-                    [ Lucid.class_ "color-inherit"
-                    , Lucid.href_
-                    $ "https://github.com/tfausak/monadoc/releases/tag/"
-                    <> version
-                    ]
-                  $ Lucid.toHtml version
-                " commit "
-                let commit = configCommit $ contextConfig context
-                Lucid.a_
-                    [ Lucid.class_ "color-inherit"
-                    , Lucid.href_
-                    $ "https://github.com/tfausak/monadoc/commit/"
-                    <> commit
-                    ]
-                  . Lucid.toHtml
-                  $ Text.take 7 commit
-                "."
-
-    ("GET", ["favicon.ico"]) -> do
-      response <- fileResponse
-        Http.ok200
-        ((Http.hContentType, "image/x-icon") : headers)
-        "favicon.ico"
-      respond response
-
-    ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 headers ""
-
-    ("GET", ["robots.txt"]) ->
-      respond . textResponse Http.ok200 headers $ Text.unlines
-        ["User-Agent: *", "Disallow:"]
-
-    ("GET", ["static", "tachyons-4-11-2.css"]) -> do
-      response <- fileResponse
-        Http.ok200
-        ((Http.hContentType, "text/css") : headers)
-        "tachyons-4-11-2.css"
-      respond response
-
+    ("GET", []) ->
+      indexHandler context maybeGitHubUser headers request respond
+    ("GET", ["favicon.ico"]) -> faviconHandler headers request respond
+    ("GET", ["health-check"]) -> healthCheckHandler headers request respond
+    ("GET", ["robots.txt"]) -> robotsHandler headers request respond
+    ("GET", ["static", "tachyons-4-11-2.css"]) ->
+      tachyonsHandler headers request respond
     ("GET", ["github-callback"]) ->
-      case lookup "code" $ Wai.queryString request of
-        Just (Just code) -> do
-          token <- do
-            req <- Client.parseUrlThrow
-              "https://github.com/login/oauth/access_token"
-            res <- performRequest
-              context
-              req
-                { Client.method = Http.methodPost
-                , Client.requestBody =
-                  Client.RequestBodyLBS . Aeson.encode $ Aeson.object
-                    [ jsonPair "client_id" . configClientId $ contextConfig
-                      context
-                    , jsonPair "client_secret"
-                    . configClientSecret
-                    $ contextConfig context
-                    , jsonPair "code"
-                      $ Text.decodeUtf8With Text.lenientDecode code
-                    ]
-                , Client.requestHeaders =
-                  [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
-                }
-            either fail (pure . gitHubOAuthAccessToken)
-              . Aeson.eitherDecode
-              $ Client.responseBody res
-          login <- do
-            req <- Client.parseUrlThrow "https://api.github.com/user"
-            res <- performRequest
-              context
-              req
-                { Client.requestHeaders =
-                  [ (Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)
-                  , (Http.hUserAgent, Text.encodeUtf8 $ "monadoc-" <> version)
-                  ]
-                }
-            either fail (pure . gitHubApiLogin)
-              . Aeson.eitherDecode
-              $ Client.responseBody res
-          randomUuid <- Uuid.nextRandom
-          let
-            newGitHubUser = GitHubUser
-              { gitHubUserGuid = randomUuid
-              , gitHubUserLogin = login
-              , gitHubUserToken = token
-              }
-          [Sql.Only guid] <- Sql.query
-            (contextConnection context)
-            "insert into github_users (login, token, guid) values (?, ?, ?) \
-            \on conflict (login) do update set token = excluded.token \
-            \returning guid"
-            newGitHubUser
-          let gitHubUser = newGitHubUser { gitHubUserGuid = guid }
-          -- TODO: Redirect to where the user wanted to go.
-          respond
-            . statusResponse Http.found302
-            $ [(Http.hLocation, "/")]
-            <> setCookieHeader context (Just gitHubUser)
-            <> headers
-        _ -> respond $ statusResponse Http.badRequest400 headers
+      gitHubCallbackHandler context headers request respond
+    _ -> notFoundHandler headers request respond
 
-    _ -> respond $ statusResponse Http.notFound404 headers
+
+type Handler
+  = Http.ResponseHeaders
+  -> Wai.Request
+  -> (Wai.Response -> IO Wai.ResponseReceived)
+  -> IO Wai.ResponseReceived
+
+
+indexHandler :: Context -> Maybe GitHubUser -> Handler
+indexHandler context maybeGitHubUser headers _ respond =
+  respond . htmlResponse Http.ok200 headers $ do
+    Lucid.doctype_
+    Lucid.html_ [Lucid.lang_ "en-US"] $ do
+      Lucid.head_ $ do
+        Lucid.meta_ [Lucid.charset_ "utf-8"]
+        Lucid.meta_
+          [ Lucid.name_ "viewport"
+          , Lucid.content_ "initial-scale = 1, width = device-width"
+          ]
+        Lucid.meta_
+          [ Lucid.name_ "description"
+          , Lucid.content_ "\x1f516 Better Haskell documentation."
+          ]
+        Lucid.title_ "Monadoc"
+        Lucid.link_
+          [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
+      Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
+        Lucid.header_
+            [ Lucid.class_
+                "bg-purple flex items-center justify-between pa3 white"
+            ]
+          $ do
+              Lucid.h1_ [Lucid.class_ "ma0 normal"] $ Lucid.a_
+                [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
+                "Monadoc"
+              Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
+                Nothing -> Lucid.a_
+                  [ Lucid.class_ "color-inherit no-underline"
+                  , Lucid.href_ $ Text.concat
+                    [ "http://github.com/login/oauth/authorize?client_id="
+                    , configClientId $ contextConfig context
+                    , "&redirect_uri="
+                    , configUrl $ contextConfig context
+                    , "/github-callback"
+                    ]
+                  ]
+                  "Log in with GitHub"
+                Just gitHubUser ->
+                  Lucid.toHtml $ "@" <> gitHubUserLogin gitHubUser
+        Lucid.main_ [Lucid.class_ "pa3"]
+          $ Lucid.p_ "\x1f516 Better Haskell documentation."
+        Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
+          . Lucid.p_ [Lucid.class_ "ma0"]
+          $ do
+              "Powered by "
+              Lucid.a_
+                [ Lucid.class_ "color-inherit"
+                , Lucid.href_ "https://github.com/tfausak/monadoc"
+                ]
+                "Monadoc"
+              " version "
+              Lucid.a_
+                  [ Lucid.class_ "color-inherit"
+                  , Lucid.href_
+                  $ "https://github.com/tfausak/monadoc/releases/tag/"
+                  <> version
+                  ]
+                $ Lucid.toHtml version
+              " commit "
+              let commit = configCommit $ contextConfig context
+              Lucid.a_
+                  [ Lucid.class_ "color-inherit"
+                  , Lucid.href_
+                  $ "https://github.com/tfausak/monadoc/commit/"
+                  <> commit
+                  ]
+                . Lucid.toHtml
+                $ Text.take 7 commit
+              "."
+
+
+faviconHandler :: Handler
+faviconHandler headers _ respond = do
+  response <- fileResponse
+    Http.ok200
+    ((Http.hContentType, iconMime) : headers)
+    "favicon.ico"
+  respond response
+
+
+healthCheckHandler :: Handler
+healthCheckHandler headers _ respond =
+  respond $ textResponse Http.ok200 headers ""
+
+
+robotsHandler :: Handler
+robotsHandler headers _ respond =
+  respond . textResponse Http.ok200 headers $ Text.unlines
+    ["User-Agent: *", "Disallow:"]
+
+
+tachyonsHandler :: Handler
+tachyonsHandler headers _ respond = do
+  response <- fileResponse
+    Http.ok200
+    ((Http.hContentType, cssMime) : headers)
+    "tachyons-4-11-2.css"
+  respond response
+
+
+gitHubCallbackHandler :: Context -> Handler
+gitHubCallbackHandler context headers request respond =
+  case lookup "code" $ Wai.queryString request of
+    Just (Just code) -> do
+      token <- do
+        req <- Client.parseUrlThrow
+          "https://github.com/login/oauth/access_token"
+        res <- performRequest
+          context
+          req
+            { Client.method = Http.methodPost
+            , Client.requestBody =
+              Client.RequestBodyLBS . Aeson.encode $ Aeson.object
+                [ jsonPair "client_id" . configClientId $ contextConfig context
+                , jsonPair "client_secret" . configClientSecret $ contextConfig
+                  context
+                , jsonPair "code" $ Text.decodeUtf8With Text.lenientDecode code
+                ]
+            , Client.requestHeaders =
+              [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
+            }
+        either fail (pure . gitHubOAuthAccessToken)
+          . Aeson.eitherDecode
+          $ Client.responseBody res
+      login <- do
+        req <- Client.parseUrlThrow "https://api.github.com/user"
+        res <- performRequest
+          context
+          req
+            { Client.requestHeaders =
+              [ (Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)
+              , (Http.hUserAgent, Text.encodeUtf8 $ "monadoc-" <> version)
+              ]
+            }
+        either fail (pure . gitHubApiLogin)
+          . Aeson.eitherDecode
+          $ Client.responseBody res
+      randomUuid <- Uuid.nextRandom
+      let
+        newGitHubUser = GitHubUser
+          { gitHubUserGuid = randomUuid
+          , gitHubUserLogin = login
+          , gitHubUserToken = token
+          }
+      [Sql.Only guid] <- Sql.query
+        (contextConnection context)
+        "insert into github_users (login, token, guid) values (?, ?, ?) \
+      \on conflict (login) do update set token = excluded.token \
+      \returning guid"
+        newGitHubUser
+      let gitHubUser = newGitHubUser { gitHubUserGuid = guid }
+      -- TODO: Redirect to where the user wanted to go.
+      respond
+        . statusResponse Http.found302
+        $ [(Http.hLocation, "/")]
+        <> setCookieHeader context (Just gitHubUser)
+        <> headers
+    _ -> respond $ statusResponse Http.badRequest400 headers
+
+
+notFoundHandler :: Handler
+notFoundHandler headers _ respond =
+  respond $ statusResponse Http.notFound404 headers
 
 
 data GitHubUser = GitHubUser
@@ -585,8 +657,24 @@ jsonPair :: (Aeson.ToJSON v, Aeson.KeyValue p) => Text.Text -> v -> p
 jsonPair = (Aeson..=)
 
 
+cssMime :: ByteString.ByteString
+cssMime = "text/css"
+
+
+htmlMime :: ByteString.ByteString
+htmlMime = "text/html; charset=utf-8"
+
+
+iconMime :: ByteString.ByteString
+iconMime = "image/x-icon"
+
+
 jsonMime :: ByteString.ByteString
 jsonMime = "application/json"
+
+
+textMime :: ByteString.ByteString
+textMime = "text/plain; charset=utf-8"
 
 
 performRequest
@@ -618,7 +706,7 @@ fileResponse status headers file = do
 htmlResponse
   :: Http.Status -> Http.ResponseHeaders -> Lucid.Html a -> Wai.Response
 htmlResponse status headers =
-  responseBS status ((Http.hContentType, "text/html; charset=utf-8") : headers)
+  responseBS status ((Http.hContentType, htmlMime) : headers)
     . LazyByteString.toStrict
     . Lucid.renderBS
 
@@ -634,10 +722,7 @@ statusResponse status headers = textResponse status headers $ Text.unwords
 textResponse
   :: Http.Status -> Http.ResponseHeaders -> Text.Text -> Wai.Response
 textResponse status headers =
-  responseBS
-      status
-      ((Http.hContentType, "text/plain; charset=utf-8") : headers)
-    . Text.encodeUtf8
+  responseBS status ((Http.hContentType, textMime) : headers) . Text.encodeUtf8
 
 
 responseBS
@@ -681,11 +766,8 @@ isHttps = Text.isPrefixOf "https:"
 contentSecurityPolicy :: ByteString.ByteString
 contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
   "; "
-  [ "base-uri 'none'"
-  , "default-src 'none'"
-  , "form-action 'self'"
-  , "frame-ancestors 'none'"
-  , "object-src 'none'"
+  [ "default-src 'none'"
+  , "require-trusted-types-for 'script'"
   , "style-src 'self'"
   ]
 
