@@ -90,15 +90,19 @@ getConfig = do
 
 
 getClientId :: IO Text.Text
-getClientId = fmap Text.pack $ Environment.getEnv "monadoc_client_id"
+getClientId = getEnv "monadoc_client_id"
 
 
 getClientSecret :: IO Text.Text
-getClientSecret = fmap Text.pack $ Environment.getEnv "monadoc_client_secret"
+getClientSecret = getEnv "monadoc_client_secret"
 
 
 getCommit :: IO Text.Text
-getCommit = fmap Text.pack $ Environment.getEnv "monadoc_commit"
+getCommit = getEnv "monadoc_commit"
+
+
+getEnv :: Text.Text -> IO Text.Text
+getEnv = fmap Text.pack . Environment.getEnv . Text.unpack
 
 
 version :: Text.Text
