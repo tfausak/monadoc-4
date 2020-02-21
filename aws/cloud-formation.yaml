@@ -432,6 +432,8 @@ Resources:
               Value: '{{resolve:secretsmanager:GitHub:SecretString:ClientId}}'
             - Name: monadoc_client_secret
               Value: '{{resolve:secretsmanager:GitHub:SecretString:ClientSecret}}'
+            - Name: monadoc_commit
+              Value: !Ref Commit
             - Name: monadoc_port
               Value: !Ref Port
             - Name: PGDATABASE

@@ -33,6 +33,7 @@ services:
       monadoc_client_id: 235ce8c873f4ed90905c
       monadoc_client_secret: null
       monadoc_commit: 4837a4e547171997cb289f2e523d79edb602fc71
+      monadoc_port: 8080
       PGDATABASE: postgres
       PGHOST: postgres
       PGPASSWORD: postgres

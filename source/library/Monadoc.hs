@@ -38,6 +38,7 @@ import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
 import qualified System.IO as IO
 import qualified System.IO.Unsafe as Unsafe
+import qualified Text.Read as Read
 
 
 main :: IO ()
@@ -74,6 +75,7 @@ data Config = Config
   { configClientId :: Text.Text
   , configClientSecret :: Text.Text
   , configCommit :: Text.Text
+  , configPort :: Warp.Port
   } deriving (Eq, Show)
 
 
@@ -82,10 +84,12 @@ getConfig = do
   clientId <- getClientId
   clientSecret <- getClientSecret
   commit <- getCommit
+  port <- getPort
   pure Config
     { configClientId = clientId
     , configClientSecret = clientSecret
     , configCommit = commit
+    , configPort = port
     }
 
 
@@ -99,6 +103,15 @@ getClientSecret = getEnv "monadoc_client_secret"
 
 getCommit :: IO Text.Text
 getCommit = getEnv "monadoc_commit"
+
+
+getPort :: IO Warp.Port
+getPort = do
+  let name = "monadoc_port" :: String
+  string <- Environment.getEnv name
+  case Read.readEither string of
+    Left message -> fail $ mconcat [name, ": invalid value (", message, ")"]
+    Right port -> pure port
 
 
 getEnv :: Text.Text -> IO Text.Text
@@ -238,17 +251,21 @@ makeDigest = Digest . Crypto.hash
 settings :: Config -> Warp.Settings
 settings config =
   Warp.defaultSettings
-    & Warp.setBeforeMainLoop beforeMainLoop
+    & Warp.setBeforeMainLoop (beforeMainLoop config)
     & Warp.setHost host
     & Warp.setLogger logger
     & Warp.setOnExceptionResponse onExceptionResponse
-    & Warp.setPort port
+    & Warp.setPort (configPort config)
     & Warp.setServerName (makeServerName config)
 
 
-beforeMainLoop :: IO ()
-beforeMainLoop = say $ Text.unwords
-  ["listening on", Text.pack $ show host, "port", Text.pack $ show port]
+beforeMainLoop :: Config -> IO ()
+beforeMainLoop config = say $ Text.unwords
+  [ "listening on"
+  , Text.pack $ show host
+  , "port"
+  , Text.pack . show $ configPort config
+  ]
 
 
 host :: Warp.HostPreference
@@ -267,10 +284,6 @@ logger request status _ = say $ Text.unwords
 
 onExceptionResponse :: Exception.SomeException -> Wai.Response
 onExceptionResponse _ = statusResponse Http.internalServerError500
-
-
-port :: Warp.Port
-port = 8080
 
 
 makeServerName :: Config -> ByteString.ByteString
