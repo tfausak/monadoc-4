@@ -33,6 +33,7 @@ import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
 import qualified Database.PostgreSQL.Simple.FromRow as Sql
 import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Database.PostgreSQL.Simple.ToRow as Sql
+import qualified GHC.Clock as Clock
 import qualified Lucid
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.TLS as Tls
@@ -45,6 +46,7 @@ import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
 import qualified System.IO as IO
 import qualified System.IO.Unsafe as Unsafe
+import qualified Text.Printf as Printf
 import qualified Text.Read as Read
 import qualified Web.Cookie as Cookie
 
@@ -691,11 +693,13 @@ performRequest context request = do
     method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
     url = Text.pack $ Uri.uriToString id (Client.getUri request) ""
   say $ Text.unwords [method, url]
-  response <- Client.httpLbs request $ contextManager context
+  (response, seconds) <- withDuration . Client.httpLbs request $ contextManager
+    context
   let
     status =
       Text.pack . show . Http.statusCode $ Client.responseStatus response
-  say $ Text.unwords [method, url, status]
+    duration = Text.pack $ Printf.printf "%.3f" seconds
+  say $ Text.unwords [method, url, status, duration]
   pure response
 
 
@@ -792,3 +796,11 @@ replaceHeaders new old = foldr replaceHeader old new
 
 runWorker :: Context -> IO ()
 runWorker _ = Monad.forever $ Concurrent.threadDelay 1000000
+
+
+withDuration :: IO a -> IO (a, Double)
+withDuration action = do
+  before <- Clock.getMonotonicTime
+  result <- action
+  after <- Clock.getMonotonicTime
+  pure (result, after - before)
