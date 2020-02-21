@@ -22,6 +22,8 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
 import qualified Data.Text.IO as Text
 import qualified Data.Time as Time
+import qualified Data.UUID as Uuid
+import qualified Data.UUID.V4 as Uuid
 import qualified Data.Version as Version
 import qualified Database.PostgreSQL.Simple as Sql
 import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
@@ -193,11 +195,17 @@ runMigration connection (time, migration) = do
 migrations :: [(Time.UTCTime, Sql.Query)]
 migrations =
   [ makeMigration
-      (2020, 2, 16, 9, 14, 0)
-      "create table blobs (\
-      \digest bytea primary key, \
-      \size integer not null, \
-      \content bytea not null)"
+    (2020, 2, 16, 9, 14, 0)
+    "create table blobs (\
+    \digest bytea primary key, \
+    \size integer not null, \
+    \content bytea not null)"
+  , makeMigration
+    (2020, 2, 20, 9, 9, 0)
+    "create table github_users (\
+    \login text primary key, \
+    \token text not null, \
+    \guid uuid not null unique)"
   ]
 
 
@@ -428,17 +436,31 @@ application context request respond =
               context
               req
                 { Client.requestHeaders =
-                  [(Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)]
+                  [ (Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)
+                  , (Http.hUserAgent, Text.encodeUtf8 $ "monadoc-" <> version)
+                  ]
                 }
             either fail (pure . gitHubUserLogin)
               . Aeson.eitherDecode
               $ Client.responseBody res
-          -- TODO: Store the login and the token in the database. Return a 302
-          -- request to whichever page the user was on. Add a Set-Cookie header
-          -- to the response.
-          undefined login
-        _ -> respond . statusResponse Http.badRequest400 $ defaultHeaders
-          context
+          randomUuid <- Uuid.nextRandom
+          [Sql.Only guid] <- Sql.query
+            (contextConnection context)
+            "insert into github_users (login, token, guid) values (?, ?, ?) \
+            \on conflict (login) do update set token = excluded.token \
+            \returning guid"
+            (login, token, randomUuid)
+          -- TODO: Redirect to where the user wanted to go.
+          respond
+            . statusResponse Http.found302
+            $ (Http.hLocation, "/")
+            : ( Http.hSetCookie
+              , Text.encodeUtf8 $ Text.concat
+                ["guid=", Uuid.toText guid, "; HttpOnly; SameSite=Strict"]
+              )
+            : defaultHeaders context
+        _ ->
+          respond . statusResponse Http.badRequest400 $ defaultHeaders context
 
     _ -> respond . statusResponse Http.notFound404 $ defaultHeaders context
 
