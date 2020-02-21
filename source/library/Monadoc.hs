@@ -571,10 +571,11 @@ contentSecurityPolicy :: ByteString.ByteString
 contentSecurityPolicy = Text.encodeUtf8 $ Text.intercalate
   "; "
   [ "base-uri 'none'"
-  , "default-src 'self'"
+  , "default-src 'none'"
   , "form-action 'self'"
   , "frame-ancestors 'none'"
   , "object-src 'none'"
+  , "style-src 'self'"
   ]
 
 
