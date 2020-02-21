@@ -12,6 +12,8 @@ import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.STM as Stm
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
+import qualified Control.Monad.Trans.Class as Trans
+import qualified Control.Monad.Trans.Reader as Reader
 import qualified Crypto.Hash as Crypto
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -57,8 +59,8 @@ main = do
   config <- getConfig
   say $ Text.unwords ["monadoc", version, configCommit config]
   withConnection $ \connection -> do
-    runMigrations connection
     context <- makeContext config connection
+    Reader.runReaderT runMigrations context
     Async.race_ (runServer context) (runWorker context)
 
 
@@ -163,10 +165,15 @@ makeContext config connection = do
     }
 
 
-runMigrations :: Sql.Connection -> IO ()
-runMigrations connection = do
-  createMigrationTableIfNecessary connection
-  mapM_ (runMigrationIfNecessary connection) migrations
+type App = Reader.ReaderT Context IO
+
+
+runMigrations :: App ()
+runMigrations = do
+  connection <- Reader.asks contextConnection
+  Trans.lift $ do
+    createMigrationTableIfNecessary connection
+    mapM_ (runMigrationIfNecessary connection) migrations
 
 
 createMigrationTableIfNecessary :: Sql.Connection -> IO ()
