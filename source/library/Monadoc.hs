@@ -17,6 +17,7 @@ import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Fixed as Fixed
+import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
@@ -395,14 +396,16 @@ cookieName = "guid"
 handleEtag :: Wai.Middleware
 handleEtag handle request respond = handle request $ \response ->
   let
+    isGet = Wai.requestMethod request == Http.methodGet
+    isSuccessful = Http.statusIsSuccessful $ Wai.responseStatus response
     expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
+    hasEtag = Maybe.isJust expected
     actual = lookup Http.hETag $ Wai.responseHeaders response
-  in respond $ case (Wai.requestMethod request, expected, actual) of
-    ("GET", Just _, Just _) | expected == actual -> responseBS
-      Http.notModified304
+  in respond $ if isGet && isSuccessful && hasEtag && actual == expected
+    then responseBS Http.notModified304
       (Wai.responseHeaders response)
       ByteString.empty
-    _ -> response
+    else response
 
 
 application :: Context -> Wai.Application
