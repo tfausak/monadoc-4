@@ -290,7 +290,7 @@ logger request status _ = say $ Text.unwords
 
 
 onExceptionResponse :: Exception.SomeException -> Wai.Response
-onExceptionResponse _ = statusResponse Http.internalServerError500
+onExceptionResponse _ = statusResponse Http.internalServerError500 []
 
 
 makeServerName :: Config -> ByteString.ByteString
@@ -317,7 +317,7 @@ application :: Context -> Wai.Application
 application context request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
-    ("GET", []) -> respond . htmlResponse $ do
+    ("GET", []) -> respond . htmlResponse Http.ok200 [] $ do
       Lucid.doctype_
       Lucid.html_ [Lucid.lang_ "en-US"] $ do
         Lucid.head_ $ do
@@ -373,17 +373,23 @@ application context request respond =
                 "."
 
     ("GET", ["favicon.ico"]) -> do
-      response <- fileResponse "image/x-icon" "favicon.ico"
+      response <- fileResponse
+        Http.ok200
+        [(Http.hContentType, "image/x-icon")]
+        "favicon.ico"
       respond response
 
-    ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 ""
+    ("GET", ["health-check"]) -> respond $ textResponse Http.ok200 [] ""
 
     ("GET", ["robots.txt"]) ->
-      respond . textResponse Http.ok200 $ Text.unlines
+      respond . textResponse Http.ok200 [] $ Text.unlines
         ["User-Agent: *", "Disallow:"]
 
     ("GET", ["static", "tachyons-4-11-2.css"]) -> do
-      response <- fileResponse "text/css" "tachyons-4-11-2.css"
+      response <- fileResponse
+        Http.ok200
+        [(Http.hContentType, "text/css")]
+        "tachyons-4-11-2.css"
       respond response
 
     ("GET", ["github-callback"]) ->
@@ -427,9 +433,9 @@ application context request respond =
           -- request to whichever page the user was on. Add a Set-Cookie header
           -- to the response.
           undefined login
-        _ -> respond $ statusResponse Http.badRequest400
+        _ -> respond $ statusResponse Http.badRequest400 []
 
-    _ -> respond $ statusResponse Http.notFound404
+    _ -> respond $ statusResponse Http.notFound404 []
 
 
 newtype GitHubOAuth = GitHubOAuth
@@ -484,32 +490,37 @@ performRequest context request = do
   pure response
 
 
-fileResponse :: ByteString.ByteString -> FilePath -> IO Wai.Response
-fileResponse mime file = do
+fileResponse
+  :: Http.Status -> Http.ResponseHeaders -> FilePath -> IO Wai.Response
+fileResponse status headers file = do
   path <- Package.getDataFileName file
   contents <- ByteString.readFile path
-  pure $ responseBS Http.ok200 [(Http.hContentType, mime)] contents
+  pure $ responseBS status headers contents
 
 
 
-htmlResponse :: Lucid.Html a -> Wai.Response
-htmlResponse =
-  responseBS Http.ok200 [(Http.hContentType, "text/html; charset=utf-8")]
+htmlResponse
+  :: Http.Status -> Http.ResponseHeaders -> Lucid.Html a -> Wai.Response
+htmlResponse status headers =
+  responseBS status ((Http.hContentType, "text/html; charset=utf-8") : headers)
     . LazyByteString.toStrict
     . Lucid.renderBS
 
 
 
-statusResponse :: Http.Status -> Wai.Response
-statusResponse status = textResponse status $ Text.unwords
+statusResponse :: Http.Status -> Http.ResponseHeaders -> Wai.Response
+statusResponse status headers = textResponse status headers $ Text.unwords
   [ Text.pack . show $ Http.statusCode status
   , Text.decodeUtf8With Text.lenientDecode $ Http.statusMessage status
   ]
 
 
-textResponse :: Http.Status -> Text.Text -> Wai.Response
-textResponse status =
-  responseBS status [(Http.hContentType, "text/plain; charset=utf-8")]
+textResponse
+  :: Http.Status -> Http.ResponseHeaders -> Text.Text -> Wai.Response
+textResponse status headers =
+  responseBS
+      status
+      ((Http.hContentType, "text/plain; charset=utf-8") : headers)
     . Text.encodeUtf8
 
 
