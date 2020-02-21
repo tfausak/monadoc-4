@@ -787,4 +787,4 @@ replaceHeader new headers = case headers of
 
 
 replaceHeaders :: [Http.Header] -> [Http.Header] -> [Http.Header]
-replaceHeaders = foldr replaceHeader
+replaceHeaders new old = foldr replaceHeader old new
