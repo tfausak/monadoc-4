@@ -7,6 +7,8 @@ where
 
 import Data.Function ((&))
 
+import qualified Control.Concurrent as Concurrent
+import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.STM as Stm
 import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
@@ -55,7 +57,7 @@ main = do
   withConnection $ \connection -> do
     runMigrations connection
     context <- makeContext config connection
-    runServer context
+    Async.race_ (runServer context) (runWorker context)
 
 
 say :: Text.Text -> IO ()
@@ -402,7 +404,8 @@ handleEtag handle request respond = handle request $ \response ->
     hasEtag = Maybe.isJust expected
     actual = lookup Http.hETag $ Wai.responseHeaders response
   in respond $ if isGet && isSuccessful && hasEtag && actual == expected
-    then responseBS Http.notModified304
+    then responseBS
+      Http.notModified304
       (Wai.responseHeaders response)
       ByteString.empty
     else response
@@ -785,3 +788,7 @@ replaceHeader new headers = case headers of
 
 replaceHeaders :: [Http.Header] -> [Http.Header] -> [Http.Header]
 replaceHeaders new old = foldr replaceHeader old new
+
+
+runWorker :: Context -> IO ()
+runWorker _ = Monad.forever $ Concurrent.threadDelay 1000000
