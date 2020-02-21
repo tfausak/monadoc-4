@@ -49,7 +49,8 @@ main = do
   withConnection $ \connection -> do
     runMigrations connection
     context <- makeContext config connection
-    Warp.runSettings (settings config) . middleware $ application context
+    Warp.runSettings (settings context) . middleware context $ application
+      context
 
 
 say :: Text.Text -> IO ()
@@ -255,15 +256,15 @@ makeDigest :: ByteString.ByteString -> Digest
 makeDigest = Digest . Crypto.hash
 
 
-settings :: Config -> Warp.Settings
-settings config =
+settings :: Context -> Warp.Settings
+settings context =
   Warp.defaultSettings
-    & Warp.setBeforeMainLoop (beforeMainLoop config)
+    & Warp.setBeforeMainLoop (beforeMainLoop $ contextConfig context)
     & Warp.setHost host
     & Warp.setLogger logger
-    & Warp.setOnExceptionResponse onExceptionResponse
-    & Warp.setPort (configPort config)
-    & Warp.setServerName (makeServerName config)
+    & Warp.setOnExceptionResponse (onExceptionResponse context)
+    & Warp.setPort (configPort $ contextConfig context)
+    & Warp.setServerName (makeServerName $ contextConfig context)
 
 
 beforeMainLoop :: Config -> IO ()
@@ -289,9 +290,9 @@ logger request status _ = say $ Text.unwords
   ]
 
 
-onExceptionResponse :: Exception.SomeException -> Wai.Response
-onExceptionResponse _ =
-  statusResponse Http.internalServerError500 defaultHeaders
+onExceptionResponse :: Context -> Exception.SomeException -> Wai.Response
+onExceptionResponse context _ =
+  statusResponse Http.internalServerError500 $ defaultHeaders context
 
 
 makeServerName :: Config -> ByteString.ByteString
@@ -299,18 +300,18 @@ makeServerName config =
   Text.encodeUtf8 $ Text.concat ["monadoc-", version, "+", configCommit config]
 
 
-middleware :: Wai.Middleware
+middleware :: Context -> Wai.Middleware
 middleware = handleEtag
 
 
-handleEtag :: Wai.Middleware
-handleEtag handle request respond = handle request $ \response ->
+handleEtag :: Context -> Wai.Middleware
+handleEtag context handle request respond = handle request $ \response ->
   let
     expected = lookup Http.hIfNoneMatch $ Wai.requestHeaders request
     actual = lookup Http.hETag $ Wai.responseHeaders response
   in respond $ case (Wai.requestMethod request, expected, actual) of
     ("GET", Just _, Just _) | expected == actual ->
-      responseBS Http.notModified304 defaultHeaders ByteString.empty
+      responseBS Http.notModified304 (defaultHeaders context) ByteString.empty
     _ -> response
 
 
@@ -318,79 +319,80 @@ application :: Context -> Wai.Application
 application context request respond =
   case (Wai.requestMethod request, Wai.pathInfo request) of
 
-    ("GET", []) -> respond . htmlResponse Http.ok200 defaultHeaders $ do
-      Lucid.doctype_
-      Lucid.html_ [Lucid.lang_ "en-US"] $ do
-        Lucid.head_ $ do
-          Lucid.meta_ [Lucid.charset_ "utf-8"]
-          Lucid.meta_
-            [ Lucid.name_ "viewport"
-            , Lucid.content_ "initial-scale = 1, width = device-width"
-            ]
-          Lucid.meta_
-            [ Lucid.name_ "description"
-            , Lucid.content_ "\x1f516 Better Haskell documentation."
-            ]
-          Lucid.title_ "Monadoc"
-          Lucid.link_
-            [ Lucid.rel_ "stylesheet"
-            , Lucid.href_ "/static/tachyons-4-11-2.css"
-            ]
-        Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-          Lucid.header_ [Lucid.class_ "bg-purple pa3 white"]
-            . Lucid.h1_ [Lucid.class_ "ma0 normal"]
-            $ Lucid.a_
-                [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-                "Monadoc"
-          Lucid.main_ [Lucid.class_ "pa3"]
-            $ Lucid.p_ "\x1f516 Better Haskell documentation."
-          Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
-            . Lucid.p_ [Lucid.class_ "ma0"]
-            $ do
-                "Powered by "
-                Lucid.a_
-                  [ Lucid.class_ "color-inherit"
-                  , Lucid.href_ "https://github.com/tfausak/monadoc"
-                  ]
+    ("GET", []) ->
+      respond . htmlResponse Http.ok200 (defaultHeaders context) $ do
+        Lucid.doctype_
+        Lucid.html_ [Lucid.lang_ "en-US"] $ do
+          Lucid.head_ $ do
+            Lucid.meta_ [Lucid.charset_ "utf-8"]
+            Lucid.meta_
+              [ Lucid.name_ "viewport"
+              , Lucid.content_ "initial-scale = 1, width = device-width"
+              ]
+            Lucid.meta_
+              [ Lucid.name_ "description"
+              , Lucid.content_ "\x1f516 Better Haskell documentation."
+              ]
+            Lucid.title_ "Monadoc"
+            Lucid.link_
+              [ Lucid.rel_ "stylesheet"
+              , Lucid.href_ "/static/tachyons-4-11-2.css"
+              ]
+          Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
+            Lucid.header_ [Lucid.class_ "bg-purple pa3 white"]
+              . Lucid.h1_ [Lucid.class_ "ma0 normal"]
+              $ Lucid.a_
+                  [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
                   "Monadoc"
-                " version "
-                Lucid.a_
+            Lucid.main_ [Lucid.class_ "pa3"]
+              $ Lucid.p_ "\x1f516 Better Haskell documentation."
+            Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
+              . Lucid.p_ [Lucid.class_ "ma0"]
+              $ do
+                  "Powered by "
+                  Lucid.a_
                     [ Lucid.class_ "color-inherit"
-                    , Lucid.href_
-                    $ "https://github.com/tfausak/monadoc/releases/tag/"
-                    <> version
+                    , Lucid.href_ "https://github.com/tfausak/monadoc"
                     ]
-                  $ Lucid.toHtml version
-                " commit "
-                let commit = configCommit $ contextConfig context
-                Lucid.a_
-                    [ Lucid.class_ "color-inherit"
-                    , Lucid.href_
-                    $ "https://github.com/tfausak/monadoc/commit/"
-                    <> commit
-                    ]
-                  . Lucid.toHtml
-                  $ Text.take 7 commit
-                "."
+                    "Monadoc"
+                  " version "
+                  Lucid.a_
+                      [ Lucid.class_ "color-inherit"
+                      , Lucid.href_
+                      $ "https://github.com/tfausak/monadoc/releases/tag/"
+                      <> version
+                      ]
+                    $ Lucid.toHtml version
+                  " commit "
+                  let commit = configCommit $ contextConfig context
+                  Lucid.a_
+                      [ Lucid.class_ "color-inherit"
+                      , Lucid.href_
+                      $ "https://github.com/tfausak/monadoc/commit/"
+                      <> commit
+                      ]
+                    . Lucid.toHtml
+                    $ Text.take 7 commit
+                  "."
 
     ("GET", ["favicon.ico"]) -> do
       response <- fileResponse
         Http.ok200
-        ((Http.hContentType, "image/x-icon") : defaultHeaders)
+        ((Http.hContentType, "image/x-icon") : defaultHeaders context)
         "favicon.ico"
       respond response
 
     ("GET", ["health-check"]) ->
-      respond $ textResponse Http.ok200 defaultHeaders ""
+      respond $ textResponse Http.ok200 (defaultHeaders context) ""
 
     ("GET", ["robots.txt"]) ->
-      respond . textResponse Http.ok200 defaultHeaders $ Text.unlines
+      respond . textResponse Http.ok200 (defaultHeaders context) $ Text.unlines
         ["User-Agent: *", "Disallow:"]
 
     ("GET", ["static", "tachyons-4-11-2.css"]) -> do
       response <- fileResponse
         Http.ok200
-        ((Http.hContentType, "text/css") : defaultHeaders)
+        ((Http.hContentType, "text/css") : defaultHeaders context)
         "tachyons-4-11-2.css"
       respond response
 
@@ -435,9 +437,10 @@ application context request respond =
           -- request to whichever page the user was on. Add a Set-Cookie header
           -- to the response.
           undefined login
-        _ -> respond $ statusResponse Http.badRequest400 defaultHeaders
+        _ -> respond . statusResponse Http.badRequest400 $ defaultHeaders
+          context
 
-    _ -> respond $ statusResponse Http.notFound404 defaultHeaders
+    _ -> respond . statusResponse Http.notFound404 $ defaultHeaders context
 
 
 newtype GitHubOAuth = GitHubOAuth
@@ -542,8 +545,8 @@ responseBS status headers strict =
   in Wai.responseLBS status allHeaders $ LazyByteString.fromStrict strict
 
 
-defaultHeaders :: Http.ResponseHeaders
-defaultHeaders =
+defaultHeaders :: Context -> Http.ResponseHeaders
+defaultHeaders _ =
   [ ("Content-Security-Policy", contentSecurityPolicy)
   , ("Referrer-Policy", "no-referrer")
   , ("X-Content-Type-Options", "nosniff")
