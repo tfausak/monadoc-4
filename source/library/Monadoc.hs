@@ -471,7 +471,7 @@ application context request respond =
                   , (Http.hUserAgent, Text.encodeUtf8 $ "monadoc-" <> version)
                   ]
                 }
-            either fail (pure . gitHubUserLogin)
+            either fail (pure . gitHubApiLogin)
               . Aeson.eitherDecode
               $ Client.responseBody res
           randomUuid <- Uuid.nextRandom
@@ -507,15 +507,15 @@ instance Aeson.FromJSON GitHubOAuth where
     pure GitHubOAuth { gitHubOAuthAccessToken = accessToken }
 
 
-newtype GitHubUser = GitHubUser
-  { gitHubUserLogin :: Text.Text
+newtype GitHubApi = GitHubApi
+  { gitHubApiLogin :: Text.Text
   } deriving (Eq, Show)
 
 
-instance Aeson.FromJSON GitHubUser where
-  parseJSON = Aeson.withObject "GitHubUser" $ \object -> do
+instance Aeson.FromJSON GitHubApi where
+  parseJSON = Aeson.withObject "GitHubApi" $ \object -> do
     login <- requiredJsonKey object "login"
-    pure GitHubUser { gitHubUserLogin = login }
+    pure GitHubApi { gitHubApiLogin = login }
 
 
 requiredJsonKey
