@@ -546,13 +546,25 @@ responseBS status headers strict =
 
 
 defaultHeaders :: Context -> Http.ResponseHeaders
-defaultHeaders _ =
+defaultHeaders context =
   [ ("Content-Security-Policy", contentSecurityPolicy)
   , ("Feature-Policy", featurePolicy)
   , ("Referrer-Policy", "no-referrer")
+  , ("Strict-Transport-Security", strictTransportSecurity context)
   , ("X-Content-Type-Options", "nosniff")
   , ("X-Frame-Options", "deny")
   ]
+
+
+strictTransportSecurity :: Context -> ByteString.ByteString
+strictTransportSecurity context =
+  if isHttps . configUrl $ contextConfig context
+    then "max-age=86400"
+    else "max-age=0"
+
+
+isHttps :: Text.Text -> Bool
+isHttps = Text.isPrefixOf "https:"
 
 
 contentSecurityPolicy :: ByteString.ByteString
