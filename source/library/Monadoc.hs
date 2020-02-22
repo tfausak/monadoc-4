@@ -247,6 +247,11 @@ migrations =
     \login text primary key, \
     \token text not null, \
     \guid uuid not null unique)"
+  , makeMigration
+    (2020, 2, 22, 9, 2, 0)
+    "create table files (\
+    \name text primary key, \
+    \digest bytea references blobs)"
   ]
 
 
