@@ -445,7 +445,8 @@ application context request respond = do
     ("GET", []) ->
       indexHandler context maybeGitHubUser headers request respond
     ("GET", ["favicon.ico"]) -> faviconHandler headers request respond
-    ("GET", ["health-check"]) -> healthCheckHandler headers request respond
+    ("GET", ["health-check"]) ->
+      healthCheckHandler context headers request respond
     ("GET", ["robots.txt"]) -> robotsHandler headers request respond
     ("GET", ["static", "tachyons-4-11-2.css"]) ->
       tachyonsHandler headers request respond
@@ -543,9 +544,11 @@ faviconHandler headers _ respond = do
   respond response
 
 
-healthCheckHandler :: Handler
-healthCheckHandler headers _ respond =
-  respond $ textResponse Http.ok200 headers ""
+healthCheckHandler :: Context -> Handler
+healthCheckHandler context headers _ respond = do
+  [Sql.Only one] <- Sql.query_ (contextConnection context) "select 1"
+  Monad.guard $ one == (1 :: Int)
+  respond $ statusResponse Http.ok200 headers
 
 
 robotsHandler :: Handler
