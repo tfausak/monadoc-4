@@ -57,9 +57,9 @@ main :: IO ()
 main = do
   say "starting up"
   config <- getConfig
-  say $ Text.unwords ["monadoc", version, configCommit config]
   withConnection $ \connection -> do
     context <- makeContext config connection
+    say $ nameVersionCommit context
     Reader.runReaderT runMigrations context
     Async.race_ (runServer context) (runWorker context)
 
@@ -328,7 +328,7 @@ settings context =
     & Warp.setHost host
     & Warp.setOnExceptionResponse (onExceptionResponse context)
     & Warp.setPort (configPort $ contextConfig context)
-    & Warp.setServerName (makeServerName $ contextConfig context)
+    & Warp.setServerName (Text.encodeUtf8 $ nameVersionCommit context)
 
 
 beforeMainLoop :: Config -> IO ()
@@ -349,9 +349,9 @@ onExceptionResponse context _ =
   statusResponse Http.internalServerError500 $ defaultHeaders context
 
 
-makeServerName :: Config -> ByteString.ByteString
-makeServerName config =
-  Text.encodeUtf8 $ Text.concat ["monadoc-", version, "+", configCommit config]
+nameVersionCommit :: Context -> Text.Text
+nameVersionCommit context =
+  Text.concat ["monadoc-", version, "+", configCommit $ contextConfig context]
 
 
 middleware :: Wai.Middleware
@@ -593,9 +593,7 @@ gitHubCallbackHandler context headers request respond =
           context
           req
             { Client.requestHeaders =
-              [ (Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)
-              , (Http.hUserAgent, makeServerName $ contextConfig context)
-              ]
+              [(Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)]
             }
         either fail (pure . gitHubApiLogin)
           . Aeson.eitherDecode
@@ -709,8 +707,12 @@ performRequest
   :: Context
   -> Client.Request
   -> IO (Client.Response LazyByteString.ByteString)
-performRequest context request = do
+performRequest context initialRequest = do
   let
+    userAgent = (Http.hUserAgent, Text.encodeUtf8 $ nameVersionCommit context)
+    oldHeaders = Client.requestHeaders initialRequest
+    newHeaders = replaceHeader userAgent oldHeaders
+    request = initialRequest { Client.requestHeaders = newHeaders }
     method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
     url = Text.pack $ Uri.uriToString id (Client.getUri request) ""
   say $ Text.unwords ["[client]", method, url]
