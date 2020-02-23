@@ -62,7 +62,9 @@ main = do
     context <- makeContext config connection
     say $ nameVersionCommit context
     Reader.runReaderT runMigrations context
-    Async.race_ (runServer context) (runWorker context)
+    Async.race_
+      (Reader.runReaderT runServer context)
+      (Reader.runReaderT runWorker context)
 
 
 say :: IO.MonadIO m => Text.Text -> m ()
@@ -323,10 +325,12 @@ makeDigest :: ByteString.ByteString -> Digest
 makeDigest = Digest . Crypto.hash
 
 
-runServer :: Context -> IO ()
-runServer context = do
+runServer :: App ()
+runServer = do
   say "[server] initializing"
-  Warp.runSettings (settings context) . middleware $ application context
+  context <- Reader.ask
+  IO.liftIO . Warp.runSettings (settings context) . middleware $ application
+    context
 
 
 settings :: Context -> Warp.Settings
@@ -830,8 +834,8 @@ replaceHeaders :: [Http.Header] -> [Http.Header] -> [Http.Header]
 replaceHeaders new old = foldr replaceHeader old new
 
 
-runWorker :: Context -> IO ()
-runWorker = Reader.runReaderT $ do
+runWorker :: App ()
+runWorker = do
   say "[worker] initializing"
   context <- Reader.ask
   request <- Client.parseRequest "https://hackage.haskell.org/01-index.tar.gz"
