@@ -55,7 +55,7 @@ import qualified Web.Cookie as Cookie
 
 main :: IO ()
 main = do
-  say "starting up"
+  say "initializing"
   config <- getConfig
   withConnection $ \connection -> do
     context <- makeContext config connection
@@ -252,6 +252,11 @@ migrations =
     "create table files (\
     \name text primary key, \
     \digest bytea references blobs)"
+  , makeMigration
+    (2020, 2, 23, 8, 20, 0)
+    "create table responses (\
+    \url text primary key, \
+    \etag bytea not null)"
   ]
 
 
@@ -322,7 +327,8 @@ makeDigest = Digest . Crypto.hash
 
 
 runServer :: Context -> IO ()
-runServer context =
+runServer context = do
+  say "[server] initializing"
   Warp.runSettings (settings context) . middleware $ application context
 
 
@@ -721,17 +727,20 @@ performRequest context initialRequest = do
     oldHeaders = Client.requestHeaders initialRequest
     newHeaders = replaceHeader userAgent oldHeaders
     request = initialRequest { Client.requestHeaders = newHeaders }
-    method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
-    url = Text.pack $ Uri.uriToString id (Client.getUri request) ""
-  say $ Text.unwords ["[client]", method, url]
   (response, seconds) <- withDuration . Client.httpLbs request $ contextManager
     context
   let
+    method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
+    url = requestUrl request
     status =
       Text.pack . show . Http.statusCode $ Client.responseStatus response
     duration = Text.pack $ Printf.printf "%.3f" seconds
   say $ Text.unwords ["[client]", method, url, status, duration]
   pure response
+
+
+requestUrl :: Client.Request -> Text.Text
+requestUrl request = Text.pack $ Uri.uriToString id (Client.getUri request) ""
 
 
 fileResponse
@@ -826,7 +835,52 @@ replaceHeaders new old = foldr replaceHeader old new
 
 
 runWorker :: Context -> IO ()
-runWorker _ = Monad.forever $ Concurrent.threadDelay 1000000
+runWorker context = do
+  say "[worker] initializing"
+  request <- Client.parseRequest "https://hackage.haskell.org/01-index.tar.gz"
+  let
+    connection = contextConnection context
+    url = requestUrl request
+    name = "01-index.tar.gz" :: Text.Text
+  Monad.forever $ do
+    say "[worker] starting loop"
+    oldEtag <- do
+      rows <- Sql.query
+        connection
+        "select etag from responses where url = ? limit 1"
+        [url]
+      case rows of
+        [] -> pure ByteString.empty
+        Sql.Only binary : _ -> pure $ Sql.fromBinary binary
+    response <- performRequest
+      context
+      request { Client.requestHeaders = [(Http.hIfNoneMatch, oldEtag)] }
+    case Http.statusCode $ Client.responseStatus response of
+      304 -> pure ()
+      200 -> do
+        case lookup Http.hETag $ Client.responseHeaders response of
+          Nothing -> pure ()
+          Just newEtag -> Monad.void $ Sql.execute
+            connection
+            "insert into responses (url, etag) values (?, ?) \
+            \on conflict (url) do update set etag = excluded.etag"
+            (url, Sql.Binary newEtag)
+        let
+          content = LazyByteString.toStrict $ Client.responseBody response
+          digest = makeDigest content
+        Monad.void $ Sql.execute
+          connection
+          "insert into blobs (digest, size, content) values (?, ?, ?) \
+          \on conflict (digest) do nothing"
+          (digest, ByteString.length content, Sql.Binary content)
+        Monad.void $ Sql.execute
+          connection
+          "insert into files (name, digest) values (?, ?) \
+          \on conflict (name) do update set digest = excluded.digest"
+          (name, digest)
+      _ -> fail $ show response
+    say "[worker] finished loop"
+    Concurrent.threadDelay 60000000
 
 
 withDuration :: IO a -> IO (a, Double)
