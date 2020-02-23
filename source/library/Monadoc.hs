@@ -718,17 +718,18 @@ textMime = "text/plain; charset=utf-8"
 
 
 performRequest
-  :: Context
+  :: IO.MonadIO m
+  => Context
   -> Client.Request
-  -> IO (Client.Response LazyByteString.ByteString)
+  -> m (Client.Response LazyByteString.ByteString)
 performRequest context initialRequest = do
   let
     userAgent = (Http.hUserAgent, Text.encodeUtf8 $ nameVersionCommit context)
     oldHeaders = Client.requestHeaders initialRequest
     newHeaders = replaceHeader userAgent oldHeaders
     request = initialRequest { Client.requestHeaders = newHeaders }
-  (response, seconds) <- withDuration . Client.httpLbs request $ contextManager
-    context
+  (response, seconds) <-
+    IO.liftIO . withDuration . Client.httpLbs request $ contextManager context
   let
     method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
     url = requestUrl request
@@ -835,17 +836,16 @@ replaceHeaders new old = foldr replaceHeader old new
 
 
 runWorker :: Context -> IO ()
-runWorker context = do
+runWorker = Reader.runReaderT $ do
   say "[worker] initializing"
+  context <- Reader.ask
+  let connection = contextConnection context
   request <- Client.parseRequest "https://hackage.haskell.org/01-index.tar.gz"
-  let
-    connection = contextConnection context
-    url = requestUrl request
-    name = "01-index.tar.gz" :: Text.Text
+  let url = requestUrl request
   Monad.forever $ do
     say "[worker] starting loop"
     oldEtag <- do
-      rows <- Sql.query
+      rows <- IO.liftIO $ Sql.query
         connection
         "select etag from responses where url = ? limit 1"
         [url]
@@ -860,7 +860,7 @@ runWorker context = do
       200 -> do
         case lookup Http.hETag $ Client.responseHeaders response of
           Nothing -> pure ()
-          Just newEtag -> Monad.void $ Sql.execute
+          Just newEtag -> IO.liftIO . Monad.void $ Sql.execute
             connection
             "insert into responses (url, etag) values (?, ?) \
             \on conflict (url) do update set etag = excluded.etag"
@@ -868,19 +868,20 @@ runWorker context = do
         let
           content = LazyByteString.toStrict $ Client.responseBody response
           digest = makeDigest content
-        Monad.void $ Sql.execute
+        IO.liftIO . Monad.void $ Sql.execute
           connection
           "insert into blobs (digest, size, content) values (?, ?, ?) \
           \on conflict (digest) do nothing"
           (digest, ByteString.length content, Sql.Binary content)
-        Monad.void $ Sql.execute
+        IO.liftIO . Monad.void $ Sql.execute
           connection
           "insert into files (name, digest) values (?, ?) \
           \on conflict (name) do update set digest = excluded.digest"
-          (name, digest)
+          ("01-index.tar.gz" :: Text.Text, digest)
+        pure ()
       _ -> fail $ show response
     say "[worker] finished loop"
-    Concurrent.threadDelay 60000000
+    IO.liftIO $ Concurrent.threadDelay 60000000
 
 
 withDuration :: IO a -> IO (a, Double)
