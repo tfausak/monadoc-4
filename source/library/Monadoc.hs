@@ -5,8 +5,6 @@ module Monadoc
   )
 where
 
-import Data.Function ((&))
-
 import qualified Control.Concurrent as Concurrent
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.STM as Stm
@@ -62,10 +60,8 @@ main = do
   withConnection $ \connection -> do
     context <- makeContext config connection
     say $ nameVersionCommit context
-    Reader.runReaderT runMigrations context
-    Async.race_
-      (Reader.runReaderT runServer context)
-      (Reader.runReaderT runWorker context)
+    runApp context runMigrations
+    Async.race_ (runApp context runServer) (runApp context runWorker)
 
 
 say :: IO.MonadIO m => Text.Text -> m ()
@@ -307,19 +303,18 @@ newtype Digest = Digest
 instance Sql.FromField Digest where
   fromField field maybeByteString = do
     binary <- Sql.fromField field maybeByteString
-    let byteString = Sql.fromBinary binary :: ByteString.ByteString
-    case Crypto.digestFromByteString byteString of
+    case Crypto.digestFromByteString . asByteString $ Sql.fromBinary binary of
       Nothing -> Sql.returnError Sql.ConversionFailed field "invalid digest"
       Just digest -> pure $ Digest digest
 
 
 instance Sql.ToField Digest where
   toField =
-    Sql.toField
-      . Sql.Binary
-      . (\byteString -> byteString :: ByteString.ByteString)
-      . ByteArray.convert
-      . unwrapDigest
+    Sql.toField . Sql.Binary . asByteString . ByteArray.convert . unwrapDigest
+
+
+asByteString :: ByteString.ByteString -> ByteString.ByteString
+asByteString = id
 
 
 makeDigest :: ByteString.ByteString -> Digest
@@ -336,12 +331,12 @@ runServer = do
 
 settings :: Context -> Warp.Settings
 settings context =
-  Warp.defaultSettings
-    & Warp.setBeforeMainLoop (beforeMainLoop $ contextConfig context)
-    & Warp.setHost host
-    & Warp.setOnExceptionResponse (onExceptionResponse context)
-    & Warp.setPort (configPort $ contextConfig context)
-    & Warp.setServerName (Text.encodeUtf8 $ nameVersionCommit context)
+  Warp.setBeforeMainLoop (beforeMainLoop $ contextConfig context)
+    . Warp.setHost host
+    . Warp.setOnExceptionResponse (onExceptionResponse context)
+    . Warp.setPort (configPort $ contextConfig context)
+    . Warp.setServerName (Text.encodeUtf8 $ nameVersionCommit context)
+    $ Warp.defaultSettings
 
 
 beforeMainLoop :: Config -> IO ()
