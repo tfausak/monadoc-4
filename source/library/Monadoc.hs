@@ -35,6 +35,7 @@ import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
 import qualified Database.PostgreSQL.Simple.FromRow as Sql
 import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Database.PostgreSQL.Simple.ToRow as Sql
+import qualified Database.PostgreSQL.Simple.Types as Sql
 import qualified GHC.Clock as Clock
 import qualified Lucid
 import qualified Network.HTTP.Client as Client
@@ -168,6 +169,10 @@ makeContext config connection = do
 type App = Reader.ReaderT Context IO
 
 
+runApp :: Context -> App a -> IO a
+runApp = flip Reader.runReaderT
+
+
 runMigrations :: App ()
 runMigrations = do
   createMigrationTableIfNecessary
@@ -176,10 +181,9 @@ runMigrations = do
 
 createMigrationTableIfNecessary :: App ()
 createMigrationTableIfNecessary = do
-  connection <- Reader.asks contextConnection
-  rows <- IO.liftIO $ Sql.query_
-    connection
+  rows <- sqlQuery
     "select count(*) from pg_tables where tablename = 'migrations'"
+    ()
   case rows of
     [Sql.Only count] | count == (1 :: Int) -> pure ()
     _ -> createMigrationTable
@@ -203,10 +207,7 @@ runMigrationIfNecessary (time, migration) = do
     connection
     migration
     ()
-  rows <- IO.liftIO $ Sql.query
-    connection
-    "select digest from migrations where time = ?"
-    [time]
+  rows <- sqlQuery "select digest from migrations where time = ?" [time]
   case rows of
     [] -> runMigration time migration actualDigest
     Sql.Only expectedDigest : _ ->
@@ -383,7 +384,7 @@ logger handle request respond = do
           <> Wai.rawQueryString request
       status =
         Text.pack . show . Http.statusCode $ Wai.responseStatus response
-      duration = Text.pack . Printf.printf "%.3f" $ after - before
+      duration = formatDuration $ after - before
     say $ Text.unwords ["[server]", method, path, status, duration]
     respond response
 
@@ -398,8 +399,7 @@ getUserFromCookie context request =
         Just text -> case Uuid.fromText text of
           Nothing -> pure Nothing
           Just guid -> do
-            rows <- Sql.query
-              (contextConnection context)
+            rows <- runApp context $ sqlQuery
               "select * from github_users where guid = ? limit 1"
               [guid]
             case rows of
@@ -557,7 +557,7 @@ faviconHandler headers _ respond = do
 
 healthCheckHandler :: Context -> Handler
 healthCheckHandler context headers _ respond = do
-  [Sql.Only one] <- Sql.query_ (contextConnection context) "select 1"
+  [Sql.Only one] <- runApp context $ sqlQuery "select 1" ()
   Monad.guard $ one == (1 :: Int)
   respond $ statusResponse Http.ok200 headers
 
@@ -619,11 +619,10 @@ gitHubCallbackHandler context headers request respond =
           , gitHubUserLogin = login
           , gitHubUserToken = token
           }
-      [Sql.Only guid] <- Sql.query
-        (contextConnection context)
+      [Sql.Only guid] <- runApp context $ sqlQuery
         "insert into github_users (login, token, guid) values (?, ?, ?) \
-      \on conflict (login) do update set token = excluded.token \
-      \returning guid"
+        \on conflict (login) do update set token = excluded.token \
+        \returning guid"
         newGitHubUser
       let gitHubUser = newGitHubUser { gitHubUserGuid = guid }
       -- TODO: Redirect to where the user wanted to go.
@@ -735,7 +734,7 @@ performRequest context initialRequest = do
     url = requestUrl request
     status =
       Text.pack . show . Http.statusCode $ Client.responseStatus response
-    duration = Text.pack $ Printf.printf "%.3f" seconds
+    duration = formatDuration seconds
   say $ Text.unwords ["[client]", method, url, status, duration]
   pure response
 
@@ -845,10 +844,7 @@ runWorker = Reader.runReaderT $ do
   Monad.forever $ do
     say "[worker] starting loop"
     oldEtag <- do
-      rows <- IO.liftIO $ Sql.query
-        connection
-        "select etag from responses where url = ? limit 1"
-        [url]
+      rows <- sqlQuery "select etag from responses where url = ? limit 1" [url]
       case rows of
         [] -> pure ByteString.empty
         Sql.Only binary : _ -> pure $ Sql.fromBinary binary
@@ -890,3 +886,23 @@ withDuration action = do
   result <- action
   after <- Clock.getMonotonicTime
   pure (result, after - before)
+
+
+sqlQuery :: (Sql.ToRow q, Sql.FromRow r) => Sql.Query -> q -> App [r]
+sqlQuery query subs = do
+  connection <- Reader.asks contextConnection
+  (result, duration) <- IO.liftIO . withDuration $ Sql.query
+    connection
+    query
+    subs
+  say $ Text.unwords
+    ["[sql]", formatQuery query, "/*", formatDuration duration, "*/"]
+  pure result
+
+
+formatDuration :: Double -> Text.Text
+formatDuration = Text.pack . Printf.printf "%.3f"
+
+
+formatQuery :: Sql.Query -> Text.Text
+formatQuery = Text.decodeUtf8With Text.lenientDecode . Sql.fromQuery
