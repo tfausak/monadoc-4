@@ -5,6 +5,9 @@ module Monadoc
   )
 where
 
+import qualified Codec.Archive.Tar as Tar
+import qualified Codec.Archive.Tar.Entry as Tar
+import qualified Codec.Compression.GZip as Gzip
 import qualified Control.Concurrent as Concurrent
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.STM as Stm
@@ -26,6 +29,7 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
 import qualified Data.Text.IO as Text
 import qualified Data.Time as Time
+import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.UUID as Uuid
 import qualified Data.UUID.V4 as Uuid
 import qualified Data.Version as Version
@@ -35,6 +39,12 @@ import qualified Database.PostgreSQL.Simple.FromRow as Sql
 import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Database.PostgreSQL.Simple.ToRow as Sql
 import qualified Database.PostgreSQL.Simple.Types as Sql
+import qualified Distribution.Parsec as Cabal
+import qualified Distribution.Pretty as Cabal
+import qualified Distribution.Types.PackageName as Cabal
+import qualified Distribution.Types.PackageVersionConstraint as Cabal
+import qualified Distribution.Types.Version as Cabal
+import qualified Distribution.Types.VersionRange as Cabal
 import qualified GHC.Clock as Clock
 import qualified Lucid
 import qualified Network.HTTP.Client as Client
@@ -46,6 +56,7 @@ import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
+import qualified System.FilePath as FilePath
 import qualified System.IO as IO
 import qualified System.IO.Unsafe as Unsafe
 import qualified Text.Printf as Printf
@@ -138,8 +149,8 @@ getEnv :: Text.Text -> IO Text.Text
 getEnv = fmap Text.pack . Environment.getEnv . Text.unpack
 
 
-version :: Text.Text
-version = Text.pack $ Version.showVersion Package.version
+packageVersion :: Text.Text
+packageVersion = Text.pack $ Version.showVersion Package.version
 
 
 withConnection :: (Sql.Connection -> IO a) -> IO a
@@ -253,6 +264,11 @@ migrations =
     "create table responses (\
     \url text primary key, \
     \etag bytea not null)"
+  , makeMigration
+    (2020, 2, 23, 17, 14, 0)
+    "create table preferred_versions (\
+    \package text primary key, \
+    \range text not null)"
   ]
 
 
@@ -335,17 +351,21 @@ settings context =
     . Warp.setHost host
     . Warp.setOnExceptionResponse (onExceptionResponse context)
     . Warp.setPort (configPort $ contextConfig context)
-    . Warp.setServerName (Text.encodeUtf8 $ nameVersionCommit context)
+    . Warp.setServerName (toUtf8 $ nameVersionCommit context)
     $ Warp.defaultSettings
 
 
 beforeMainLoop :: Config -> IO ()
 beforeMainLoop config = say $ Text.unwords
   [ "[server] listening on"
-  , Text.pack $ show host
+  , showText host
   , "port"
-  , Text.pack . show $ configPort config
+  , showText $ configPort config
   ]
+
+
+showText :: Show a => a -> Text.Text
+showText = Text.pack . show
 
 
 host :: Warp.HostPreference
@@ -358,8 +378,8 @@ onExceptionResponse context _ =
 
 
 nameVersionCommit :: Context -> Text.Text
-nameVersionCommit context =
-  Text.concat ["monadoc-", version, "+", configCommit $ contextConfig context]
+nameVersionCommit context = Text.concat
+  ["monadoc-", packageVersion, "+", configCommit $ contextConfig context]
 
 
 middleware :: Wai.Middleware
@@ -372,14 +392,9 @@ logger handle request respond = do
   handle request $ \response -> do
     after <- Clock.getMonotonicTime
     let
-      method =
-        Text.decodeUtf8With Text.lenientDecode $ Wai.requestMethod request
-      path =
-        Text.decodeUtf8With Text.lenientDecode
-          $ Wai.rawPathInfo request
-          <> Wai.rawQueryString request
-      status =
-        Text.pack . show . Http.statusCode $ Wai.responseStatus response
+      method = fromUtf8 $ Wai.requestMethod request
+      path = fromUtf8 $ Wai.rawPathInfo request <> Wai.rawQueryString request
+      status = showText . Http.statusCode $ Wai.responseStatus response
       duration = formatDuration $ after - before
     say $ Text.unwords ["[server]", method, path, status, duration]
     respond response
@@ -395,9 +410,8 @@ getUserFromCookie context request =
         Just text -> case Uuid.fromText text of
           Nothing -> pure Nothing
           Just guid -> do
-            rows <- runApp context $ sqlQuery
-              "select * from github_users where guid = ? limit 1"
-              [guid]
+            rows <- runApp context
+              $ sqlQuery "select * from github_users where guid = ?" [guid]
             case rows of
               [] -> pure Nothing
               gitHubUser : _ -> pure $ Just gitHubUser
@@ -408,7 +422,7 @@ setCookieHeader context maybeGitHubUser = case maybeGitHubUser of
   Nothing -> []
   Just gitHubUser ->
     [ ( Http.hSetCookie
-      , Text.encodeUtf8 $ Text.concat
+      , toUtf8 $ Text.concat
         [ cookieName
         , "="
         , Uuid.toText $ gitHubUserGuid gitHubUser
@@ -526,9 +540,9 @@ indexHandler context maybeGitHubUser headers _ respond =
                   [ Lucid.class_ "color-inherit"
                   , Lucid.href_
                   $ "https://github.com/tfausak/monadoc/releases/tag/"
-                  <> version
+                  <> packageVersion
                   ]
-                $ Lucid.toHtml version
+                $ Lucid.toHtml packageVersion
               " commit "
               let commit = configCommit $ contextConfig context
               Lucid.a_
@@ -589,7 +603,7 @@ gitHubCallbackHandler context headers request respond =
                 [ jsonPair "client_id" . configClientId $ contextConfig context
                 , jsonPair "client_secret" . configClientSecret $ contextConfig
                   context
-                , jsonPair "code" $ Text.decodeUtf8With Text.lenientDecode code
+                , jsonPair "code" $ fromUtf8 code
                 ]
             , Client.requestHeaders =
               [(Http.hAccept, jsonMime), (Http.hContentType, jsonMime)]
@@ -603,7 +617,7 @@ gitHubCallbackHandler context headers request respond =
           context
           req
             { Client.requestHeaders =
-              [(Http.hAuthorization, "Bearer " <> Text.encodeUtf8 token)]
+              [(Http.hAuthorization, "Bearer " <> toUtf8 token)]
             }
         either fail (pure . gitHubApiLogin)
           . Aeson.eitherDecode
@@ -719,17 +733,16 @@ performRequest
   -> m (Client.Response LazyByteString.ByteString)
 performRequest context initialRequest = do
   let
-    userAgent = (Http.hUserAgent, Text.encodeUtf8 $ nameVersionCommit context)
+    userAgent = (Http.hUserAgent, toUtf8 $ nameVersionCommit context)
     oldHeaders = Client.requestHeaders initialRequest
     newHeaders = replaceHeader userAgent oldHeaders
     request = initialRequest { Client.requestHeaders = newHeaders }
   (response, seconds) <-
     IO.liftIO . withDuration . Client.httpLbs request $ contextManager context
   let
-    method = Text.decodeUtf8With Text.lenientDecode $ Client.method request
+    method = fromUtf8 $ Client.method request
     url = requestUrl request
-    status =
-      Text.pack . show . Http.statusCode $ Client.responseStatus response
+    status = showText . Http.statusCode $ Client.responseStatus response
     duration = formatDuration seconds
   say $ Text.unwords ["[client]", method, url, status, duration]
   pure response
@@ -757,16 +770,14 @@ htmlResponse status headers =
 
 statusResponse :: Http.Status -> Http.ResponseHeaders -> Wai.Response
 statusResponse status headers = textResponse status headers $ Text.unwords
-  [ Text.pack . show $ Http.statusCode status
-  , Text.decodeUtf8With Text.lenientDecode $ Http.statusMessage status
-  ]
+  [showText $ Http.statusCode status, fromUtf8 $ Http.statusMessage status]
 
 
 textResponse
   :: Http.Status -> Http.ResponseHeaders -> Text.Text -> Wai.Response
 textResponse status headers =
   responseBS status (replaceHeader (Http.hContentType, textMime) headers)
-    . Text.encodeUtf8
+    . toUtf8
 
 
 responseBS
@@ -777,7 +788,7 @@ responseBS
 responseBS status headers strict =
   let
     utf8 :: Show a => a -> ByteString.ByteString
-    utf8 = Text.encodeUtf8 . Text.pack . show
+    utf8 = toUtf8 . showText
     allHeaders = replaceHeaders
       [ (Http.hContentLength, utf8 $ ByteString.length strict)
       , (Http.hETag, utf8 . show $ Crypto.hashWith Crypto.SHA256 strict)
@@ -809,14 +820,13 @@ isHttps = Text.isPrefixOf "https:"
 
 
 contentSecurityPolicy :: ByteString.ByteString
-contentSecurityPolicy = Text.encodeUtf8
-  $ Text.intercalate "; " ["default-src 'none'", "style-src 'self'"]
+contentSecurityPolicy =
+  toUtf8 $ Text.intercalate "; " ["default-src 'none'", "style-src 'self'"]
 
 
 featurePolicy :: ByteString.ByteString
-featurePolicy = Text.encodeUtf8 . Text.intercalate "; " $ fmap
-  (<> " 'none'")
-  ["camera", "microphone"]
+featurePolicy =
+  toUtf8 . Text.intercalate "; " $ fmap (<> " 'none'") ["camera", "microphone"]
 
 
 replaceHeader :: Http.Header -> [Http.Header] -> [Http.Header]
@@ -835,26 +845,106 @@ runWorker = do
   say "[worker] initializing"
   Monad.forever $ do
     say "[worker] starting loop"
-    updateHackageIndex
+    -- TODO: Remove orphaned blobs.
+    contents <- updateHackageIndex
+    processHackageIndex contents
     say "[worker] finished loop"
     sleep 60
+
+
+processHackageIndex :: LazyByteString.ByteString -> App ()
+processHackageIndex contents = do
+  rangesVar <- IO.liftIO $ Stm.newTVarIO Map.empty
+  mapM_ (processTarElement rangesVar)
+    . Tar.foldEntries ((:) . Right) [] (pure . Left)
+    . Tar.read
+    $ Gzip.decompress contents
+  ranges <- IO.liftIO $ Stm.readTVarIO rangesVar
+  Monad.void
+    . sqlHelper
+        (\con qry -> fmap (const []) . Sql.executeMany con qry)
+        "insert into preferred_versions (package, range) values (?, ?) \
+        \on conflict (package) do update set range = excluded.range"
+    . fmap (\(pkg, rng) -> (Cabal.unPackageName pkg, Cabal.prettyShow rng))
+    $ Map.toList ranges
+
+
+processTarElement
+  :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
+  -> Either Tar.FormatError Tar.Entry
+  -> App ()
+processTarElement ranges element = case element of
+  Left formatError -> throw formatError
+  Right entry -> case Tar.entryContent entry of
+    Tar.NormalFile lazyContent _ ->
+      let content = LazyByteString.toStrict lazyContent
+      in
+        case FilePath.splitDirectories $ Tar.entryPath entry of
+          [package, "preferred-versions"] -> do
+            range <-
+              case Cabal.simpleParsec . Text.unpack $ fromUtf8 content of
+                Nothing -> if ByteString.null content
+                  then pure Cabal.anyVersion
+                  else fail $ "invalid preferred versions: " <> show entry
+                Just (Cabal.PackageVersionConstraint _ range) -> pure range
+            IO.liftIO . Stm.atomically . Stm.modifyTVar ranges $ Map.insert
+              (Cabal.mkPackageName package)
+              range
+          [package, versionString, path] ->
+            case FilePath.splitExtensions path of
+              (file, ".cabal") | file == package -> do
+                let
+                  _owner = Tar.ownerName $ Tar.entryOwnership entry
+                  _time =
+                    Time.posixSecondsToUTCTime . fromIntegral $ Tar.entryTime
+                      entry
+                  _packageName = Cabal.mkPackageName package
+                _version <- case Cabal.simpleParsec versionString of
+                  Nothing -> fail $ "invalid package version: " <> show entry
+                  Just version -> pure (version :: Cabal.Version)
+                pure () -- TODO
+              (_, ".json") -> pure ()
+              _ -> fail $ "unexpected tar extension: " <> show entry
+          _ -> fail $ "unexpected tar path: " <> show entry
+    _ -> fail $ "unexpected tar content: " <> show entry
+
+
+fromUtf8 :: ByteString.ByteString -> Text.Text
+fromUtf8 = Text.decodeUtf8With Text.lenientDecode
+
+
+toUtf8 :: Text.Text -> ByteString.ByteString
+toUtf8 = Text.encodeUtf8
+
+
+throw :: (Exception.Exception e, IO.MonadIO m) => e -> m a
+throw = IO.liftIO . Exception.throwIO
 
 
 sleep :: IO.MonadIO m => Double -> m ()
 sleep = IO.liftIO . Concurrent.threadDelay . round . (1000000 *)
 
 
-updateHackageIndex :: App ()
+updateHackageIndex :: App LazyByteString.ByteString
 updateHackageIndex = do
   request <- Client.parseRequest hackageIndexUrl
   response <- performRequestWithEtag request
   case Http.statusCode $ Client.responseStatus response of
-    304 -> pure ()
     200 -> do
-      digest <- upsertBlob . LazyByteString.toStrict $ Client.responseBody
-        response
+      let content = Client.responseBody response
+      digest <- upsertBlob $ LazyByteString.toStrict content
       upsertFile hackageIndexFileName digest
-    _ -> fail $ show response
+      pure content
+    304 -> do
+      rows <- sqlQuery
+        "select blobs.content from blobs \
+        \inner join files on files.digest = blobs.digest \
+        \where files.name = ?"
+        [hackageIndexFileName]
+      case rows of
+        [] -> fail $ "failed to get Hackage index: " <> show response
+        row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
+    _ -> fail $ "failed to get Hackage index: " <> show response
 
 
 upsertFile :: Text.Text -> Digest -> App ()
@@ -878,7 +968,7 @@ performRequestWithEtag
   :: Client.Request -> App (Client.Response LazyByteString.ByteString)
 performRequestWithEtag request = do
   let url = requestUrl request
-  rows <- sqlQuery "select etag from responses where url = ? limit 1" [url]
+  rows <- sqlQuery "select etag from responses where url = ?" [url]
   let
     oldEtag = maybe ByteString.empty (Sql.fromBinary . Sql.fromOnly)
       $ Maybe.listToMaybe rows
@@ -941,4 +1031,4 @@ formatDuration = Text.pack . Printf.printf "%.3f"
 
 
 formatQuery :: Sql.Query -> Text.Text
-formatQuery = Text.decodeUtf8With Text.lenientDecode . Sql.fromQuery
+formatQuery = fromUtf8 . Sql.fromQuery
