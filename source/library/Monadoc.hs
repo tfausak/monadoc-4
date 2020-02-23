@@ -192,12 +192,11 @@ createMigrationTableIfNecessary = do
 createMigrationTable :: App ()
 createMigrationTable = do
   say "[sql] creating migration table"
-  connection <- Reader.asks contextConnection
-  IO.liftIO . Monad.void $ Sql.execute_
-    connection
+  sqlExecute
     "create table migrations (\
     \time timestamp primary key, \
     \digest bytea not null)"
+    ()
 
 
 runMigrationIfNecessary :: Migration -> App ()
@@ -217,13 +216,10 @@ runMigrationIfNecessary (time, migration) = do
 runMigration :: Time.UTCTime -> Sql.Query -> Digest -> App ()
 runMigration time migration digest = do
   say $ "[sql] running migration " <> formatTime time
-  connection <- Reader.asks contextConnection
-  IO.liftIO $ do
-    Monad.void $ Sql.execute_ connection migration
-    Monad.void $ Sql.execute
-      connection
-      "insert into migrations (time, digest) values (?, ?)"
-      (time, digest)
+  sqlExecute migration ()
+  sqlExecute
+    "insert into migrations (time, digest) values (?, ?)"
+    (time, digest)
 
 
 checkMigration :: IO.MonadIO m => Time.UTCTime -> Digest -> Digest -> m ()
@@ -838,7 +834,6 @@ runWorker :: Context -> IO ()
 runWorker = Reader.runReaderT $ do
   say "[worker] initializing"
   context <- Reader.ask
-  let connection = contextConnection context
   request <- Client.parseRequest "https://hackage.haskell.org/01-index.tar.gz"
   let url = requestUrl request
   Monad.forever $ do
@@ -856,21 +851,18 @@ runWorker = Reader.runReaderT $ do
       200 -> do
         case lookup Http.hETag $ Client.responseHeaders response of
           Nothing -> pure ()
-          Just newEtag -> IO.liftIO . Monad.void $ Sql.execute
-            connection
+          Just newEtag -> sqlExecute
             "insert into responses (url, etag) values (?, ?) \
             \on conflict (url) do update set etag = excluded.etag"
             (url, Sql.Binary newEtag)
         let
           content = LazyByteString.toStrict $ Client.responseBody response
           digest = makeDigest content
-        IO.liftIO . Monad.void $ Sql.execute
-          connection
+        sqlExecute
           "insert into blobs (digest, size, content) values (?, ?, ?) \
           \on conflict (digest) do nothing"
           (digest, ByteString.length content, Sql.Binary content)
-        IO.liftIO . Monad.void $ Sql.execute
-          connection
+        sqlExecute
           "insert into files (name, digest) values (?, ?) \
           \on conflict (name) do update set digest = excluded.digest"
           ("01-index.tar.gz" :: Text.Text, digest)
@@ -898,6 +890,14 @@ sqlQuery query subs = do
   say $ Text.unwords
     ["[sql]", formatQuery query, "/*", formatDuration duration, "*/"]
   pure result
+
+
+sqlExecute :: Sql.ToRow q => Sql.Query -> q -> App ()
+sqlExecute query subs = do
+  connection <- Reader.asks contextConnection
+  (_, duration) <- IO.liftIO . withDuration $ Sql.execute connection query subs
+  say $ Text.unwords
+    ["[sql]", formatQuery query, "/*", formatDuration duration, "*/"]
 
 
 formatDuration :: Double -> Text.Text
