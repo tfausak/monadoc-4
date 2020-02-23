@@ -833,28 +833,45 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
-  request <- Client.parseRequest hackageIndexUrl
   Monad.forever $ do
     say "[worker] starting loop"
-    response <- performRequestWithEtag request
-    case Http.statusCode $ Client.responseStatus response of
-      304 -> pure ()
-      200 -> do
-        let
-          content = LazyByteString.toStrict $ Client.responseBody response
-          digest = makeDigest content
-        sqlExecute
-          "insert into blobs (digest, size, content) values (?, ?, ?) \
-          \on conflict (digest) do nothing"
-          (digest, ByteString.length content, Sql.Binary content)
-        sqlExecute
-          "insert into files (name, digest) values (?, ?) \
-          \on conflict (name) do update set digest = excluded.digest"
-          (hackageIndexFileName, digest)
-        pure ()
-      _ -> fail $ show response
+    updateHackageIndex
     say "[worker] finished loop"
-    IO.liftIO $ Concurrent.threadDelay 60000000
+    sleep 60
+
+
+sleep :: IO.MonadIO m => Double -> m ()
+sleep = IO.liftIO . Concurrent.threadDelay . round . (1000000 *)
+
+
+updateHackageIndex :: App ()
+updateHackageIndex = do
+  request <- Client.parseRequest hackageIndexUrl
+  response <- performRequestWithEtag request
+  case Http.statusCode $ Client.responseStatus response of
+    304 -> pure ()
+    200 -> do
+      digest <- upsertBlob . LazyByteString.toStrict $ Client.responseBody
+        response
+      upsertFile hackageIndexFileName digest
+    _ -> fail $ show response
+
+
+upsertFile :: Text.Text -> Digest -> App ()
+upsertFile name digest = sqlExecute
+  "insert into files (name, digest) values (?, ?) \
+  \on conflict (name) do update set digest = excluded.digest"
+  (name, digest)
+
+
+upsertBlob :: ByteString.ByteString -> App Digest
+upsertBlob content = do
+  let digest = makeDigest content
+  sqlExecute
+    "insert into blobs (digest, size, content) values (?, ?, ?) \
+    \on conflict (digest) do nothing"
+    (digest, ByteString.length content, Sql.Binary content)
+  pure digest
 
 
 performRequestWithEtag
