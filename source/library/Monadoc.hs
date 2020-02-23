@@ -881,23 +881,25 @@ withDuration action = do
 
 
 sqlQuery :: (Sql.ToRow q, Sql.FromRow r) => Sql.Query -> q -> App [r]
-sqlQuery query subs = do
-  connection <- Reader.asks contextConnection
-  (result, duration) <- IO.liftIO . withDuration $ Sql.query
-    connection
-    query
-    subs
-  say $ Text.unwords
-    ["[sql]", formatQuery query, "/*", formatDuration duration, "*/"]
-  pure result
+sqlQuery = sqlHelper Sql.query
 
 
 sqlExecute :: Sql.ToRow q => Sql.Query -> q -> App ()
-sqlExecute query subs = do
+sqlExecute query =
+  Monad.void . sqlHelper (\c q -> fmap (const []) . Sql.execute c q) query
+
+
+sqlHelper
+  :: (Sql.Connection -> Sql.Query -> q -> IO [r]) -> Sql.Query -> q -> App [r]
+sqlHelper runQuery query substitutions = do
   connection <- Reader.asks contextConnection
-  (_, duration) <- IO.liftIO . withDuration $ Sql.execute connection query subs
+  (result, duration) <- IO.liftIO . withDuration $ runQuery
+    connection
+    query
+    substitutions
   say $ Text.unwords
-    ["[sql]", formatQuery query, "/*", formatDuration duration, "*/"]
+    ["[sql]", formatQuery query, "--", formatDuration duration]
+  pure result
 
 
 formatDuration :: Double -> Text.Text
