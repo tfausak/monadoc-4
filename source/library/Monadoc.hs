@@ -21,6 +21,7 @@ import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Fixed as Fixed
+import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -81,7 +82,7 @@ sayVar = Unsafe.unsafePerformIO $ Stm.newTMVarIO ()
 {-# NOINLINE sayVar #-}
 
 
-formatTime :: Time.UTCTime -> Text.Text
+formatTime :: Time.FormatTime t => t -> Text.Text
 formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
 
@@ -178,7 +179,9 @@ runApp = flip Reader.runReaderT
 runMigrations :: App ()
 runMigrations = do
   createMigrationTableIfNecessary
-  mapM_ runMigrationIfNecessary migrations
+  digests <- fmap Map.fromList
+    $ sqlQuery "select time, digest from migrations" ()
+  mapM_ (runMigrationIfNecessary digests) migrations
 
 
 createMigrationTableIfNecessary :: App ()
@@ -201,21 +204,19 @@ createMigrationTable = do
     ()
 
 
-runMigrationIfNecessary :: Migration -> App ()
-runMigrationIfNecessary (time, migration) = do
+runMigrationIfNecessary :: Map.Map Time.LocalTime Digest -> Migration -> App ()
+runMigrationIfNecessary digests (time, migration) = do
   connection <- Reader.asks contextConnection
   actualDigest <- IO.liftIO . fmap makeDigest $ Sql.formatQuery
     connection
     migration
     ()
-  rows <- sqlQuery "select digest from migrations where time = ?" [time]
-  case rows of
-    [] -> runMigration time migration actualDigest
-    Sql.Only expectedDigest : _ ->
-      checkMigration time expectedDigest actualDigest
+  case Map.lookup time digests of
+    Nothing -> runMigration time migration actualDigest
+    Just expectedDigest -> checkMigration time expectedDigest actualDigest
 
 
-runMigration :: Time.UTCTime -> Sql.Query -> Digest -> App ()
+runMigration :: Time.LocalTime -> Sql.Query -> Digest -> App ()
 runMigration time migration digest = do
   say $ "[sql] running migration " <> formatTime time
   sqlExecute migration ()
@@ -224,7 +225,7 @@ runMigration time migration digest = do
     (time, digest)
 
 
-checkMigration :: IO.MonadIO m => Time.UTCTime -> Digest -> Digest -> m ()
+checkMigration :: IO.MonadIO m => Time.LocalTime -> Digest -> Digest -> m ()
 checkMigration time expected actual =
   IO.liftIO
     . Monad.when (actual /= expected)
@@ -232,7 +233,7 @@ checkMigration time expected actual =
     $ MigrationDigestMismatch time expected actual
 
 
-migrations :: [(Time.UTCTime, Sql.Query)]
+migrations :: [(Time.LocalTime, Sql.Query)]
 migrations =
   [ makeMigration
     (2020, 2, 16, 9, 14, 0)
@@ -259,22 +260,22 @@ migrations =
   ]
 
 
-type Migration = (Time.UTCTime, Sql.Query)
+type Migration = (Time.LocalTime, Sql.Query)
 
 
 makeMigration
   :: (Integer, Int, Int, Int, Int, Fixed.Pico)
   -> Sql.Query
-  -> (Time.UTCTime, Sql.Query)
+  -> (Time.LocalTime, Sql.Query)
 makeMigration (year, month, day, hour, minute, second) query =
-  (makeUtcTime year month day hour minute second, query)
+  (makeLocalTime year month day hour minute second, query)
 
 
-makeUtcTime
-  :: Integer -> Int -> Int -> Int -> Int -> Fixed.Pico -> Time.UTCTime
-makeUtcTime year month day hour minute second = Time.UTCTime
-  { Time.utctDay = makeDay year month day
-  , Time.utctDayTime = Time.timeOfDayToTime $ makeTimeOfDay hour minute second
+makeLocalTime
+  :: Integer -> Int -> Int -> Int -> Int -> Fixed.Pico -> Time.LocalTime
+makeLocalTime year month day hour minute second = Time.LocalTime
+  { Time.localDay = makeDay year month day
+  , Time.localTimeOfDay = makeTimeOfDay hour minute second
   }
 
 
@@ -291,7 +292,7 @@ makeTimeOfDay hour minute second = Time.TimeOfDay
 
 
 data MigrationDigestMismatch
-  = MigrationDigestMismatch Time.UTCTime Digest Digest
+  = MigrationDigestMismatch Time.LocalTime Digest Digest
   deriving (Eq, Show)
 
 
