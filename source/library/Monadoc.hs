@@ -833,28 +833,13 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
-  context <- Reader.ask
-  request <- Client.parseRequest "https://hackage.haskell.org/01-index.tar.gz"
-  let url = requestUrl request
+  request <- Client.parseRequest hackageIndexUrl
   Monad.forever $ do
     say "[worker] starting loop"
-    oldEtag <- do
-      rows <- sqlQuery "select etag from responses where url = ? limit 1" [url]
-      case rows of
-        [] -> pure ByteString.empty
-        Sql.Only binary : _ -> pure $ Sql.fromBinary binary
-    response <- performRequest
-      context
-      request { Client.requestHeaders = [(Http.hIfNoneMatch, oldEtag)] }
+    response <- performRequestWithEtag request
     case Http.statusCode $ Client.responseStatus response of
       304 -> pure ()
       200 -> do
-        case lookup Http.hETag $ Client.responseHeaders response of
-          Nothing -> pure ()
-          Just newEtag -> sqlExecute
-            "insert into responses (url, etag) values (?, ?) \
-            \on conflict (url) do update set etag = excluded.etag"
-            (url, Sql.Binary newEtag)
         let
           content = LazyByteString.toStrict $ Client.responseBody response
           digest = makeDigest content
@@ -865,11 +850,43 @@ runWorker = do
         sqlExecute
           "insert into files (name, digest) values (?, ?) \
           \on conflict (name) do update set digest = excluded.digest"
-          ("01-index.tar.gz" :: Text.Text, digest)
+          (hackageIndexFileName, digest)
         pure ()
       _ -> fail $ show response
     say "[worker] finished loop"
     IO.liftIO $ Concurrent.threadDelay 60000000
+
+
+performRequestWithEtag
+  :: Client.Request -> App (Client.Response LazyByteString.ByteString)
+performRequestWithEtag request = do
+  let url = requestUrl request
+  rows <- sqlQuery "select etag from responses where url = ? limit 1" [url]
+  let
+    oldEtag = maybe ByteString.empty (Sql.fromBinary . Sql.fromOnly)
+      $ Maybe.listToMaybe rows
+  context <- Reader.ask
+  response <- performRequest
+    context
+    request
+      { Client.requestHeaders = replaceHeader (Http.hIfNoneMatch, oldEtag)
+        $ Client.requestHeaders request
+      }
+  case lookup Http.hETag $ Client.responseHeaders response of
+    Nothing -> pure ()
+    Just newEtag -> sqlExecute
+      "insert into responses (url, etag) values (?, ?) \
+      \on conflict (url) do update set etag = excluded.etag"
+      (url, Sql.Binary newEtag)
+  pure response
+
+
+hackageIndexUrl :: String
+hackageIndexUrl = "https://hackage.haskell.org/01-index.tar.gz"
+
+
+hackageIndexFileName :: Text.Text
+hackageIndexFileName = "01-index.tar.gz"
 
 
 withDuration :: IO a -> IO (a, Double)
