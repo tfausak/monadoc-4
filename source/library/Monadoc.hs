@@ -24,6 +24,7 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Fixed as Fixed
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
+import qualified Data.Pool as Pool
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Encoding.Error as Text
@@ -68,11 +69,10 @@ main :: IO ()
 main = do
   say "initializing"
   config <- getConfig
-  withConnection $ \connection -> do
-    context <- makeContext config connection
-    say $ nameVersionCommit context
-    runApp context runMigrations
-    Async.race_ (runApp context runServer) (runApp context runWorker)
+  context <- makeContext config
+  say $ nameVersionCommit context
+  runApp context runMigrations
+  Async.race_ (runApp context runServer) (runApp context runWorker)
 
 
 say :: IO.MonadIO m => Text.Text -> m ()
@@ -153,26 +153,27 @@ packageVersion :: Text.Text
 packageVersion = Text.pack $ Version.showVersion Package.version
 
 
-withConnection :: (Sql.Connection -> IO a) -> IO a
-withConnection =
-  Exception.bracket (Sql.connectPostgreSQL ByteString.empty) Sql.close
-
-
 data Context = Context
   { contextConfig :: Config
-  , contextConnection :: Sql.Connection
   , contextManager :: Client.Manager
+  , contextPool :: Pool.Pool Sql.Connection
   }
 
 
-makeContext :: Config -> Sql.Connection -> IO Context
-makeContext config connection = do
+makeContext :: Config -> IO Context
+makeContext config = do
   manager <- Tls.newTlsManager
+  pool <- Pool.createPool
+    (Sql.connectPostgreSQL ByteString.empty)
+    Sql.close
+    1
+    60
+    10
 
   pure Context
     { contextConfig = config
-    , contextConnection = connection
     , contextManager = manager
+    , contextPool = pool
     }
 
 
@@ -213,11 +214,7 @@ createMigrationTable = do
 
 runMigrationIfNecessary :: Map.Map Time.LocalTime Digest -> Migration -> App ()
 runMigrationIfNecessary digests (time, migration) = do
-  connection <- Reader.asks contextConnection
-  actualDigest <- IO.liftIO . fmap makeDigest $ Sql.formatQuery
-    connection
-    migration
-    ()
+  let actualDigest = makeDigest . toUtf8 $ formatQuery migration
   case Map.lookup time digests of
     Nothing -> runMigration time migration actualDigest
     Just expectedDigest -> checkMigration time expectedDigest actualDigest
@@ -1016,11 +1013,10 @@ sqlExecute query =
 sqlHelper
   :: (Sql.Connection -> Sql.Query -> q -> IO [r]) -> Sql.Query -> q -> App [r]
 sqlHelper runQuery query substitutions = do
-  connection <- Reader.asks contextConnection
-  (result, duration) <- IO.liftIO . withDuration $ runQuery
-    connection
-    query
-    substitutions
+  pool <- Reader.asks contextPool
+  (result, duration) <-
+    IO.liftIO . withDuration . Pool.withResource pool $ \connection ->
+      runQuery connection query substitutions
   say $ Text.unwords
     ["[sql]", formatQuery query, "--", formatDuration duration]
   pure result
