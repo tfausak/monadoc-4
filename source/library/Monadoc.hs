@@ -933,14 +933,19 @@ updateHackageIndex = do
       upsertFile hackageIndexFileName digest
       pure content
     304 -> do
+      digest <- do
+        rows <- sqlQuery
+          "select digest from files where name = ?"
+          [hackageIndexFileName]
+        case rows of
+          row : _ -> pure $ Sql.fromOnly row
+          _ -> fail $ "missing index file: " <> show response
       rows <- sqlQuery
-        "select blobs.content from blobs \
-        \inner join files on files.digest = blobs.digest \
-        \where files.name = ?"
-        [hackageIndexFileName]
+        "select content from blobs where digest = ?"
+        [digest :: Digest]
       case rows of
-        [] -> fail $ "failed to get Hackage index: " <> show response
         row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
+        _ -> fail $ "missing index blob: " <> show response
     _ -> fail $ "failed to get Hackage index: " <> show response
 
 
