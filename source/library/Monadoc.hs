@@ -840,6 +840,7 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
+  Monad.forever $ sleep 60 -- TODO
   Monad.forever $ do
     say "[worker] starting loop"
     -- TODO: Remove orphaned blobs.
