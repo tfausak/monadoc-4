@@ -950,7 +950,9 @@ updateHackageIndex = do
         say "[tmp] got hackage index digest"
         case rows of
           row : _ -> pure $ Sql.fromOnly row
-          _ -> fail $ "missing index file: " <> show response
+          _ -> do
+            sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
+            fail $ "missing index file: " <> show response
       say $ "[tmp] hackage index digest is: " <> showText digest
       say "[tmp] getting hackage index content"
       rows <- sqlQuery
@@ -962,7 +964,10 @@ updateHackageIndex = do
           let content = Sql.fromBinary $ Sql.fromOnly row
           say $ "[tmp] hackage index size in bytes: " <> showText (LazyByteString.length content)
           pure content
-        _ -> fail $ "missing index blob: " <> show response
+        _ -> do
+          sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
+          sqlExecute "delete from files where name = ?" [hackageIndexFileName]
+          fail $ "missing index blob: " <> show response
     _ -> fail $ "failed to get Hackage index: " <> show response
 
 
