@@ -181,7 +181,11 @@ type App = Reader.ReaderT Context IO
 
 
 runApp :: Context -> App a -> IO a
-runApp = flip Reader.runReaderT
+runApp context app = Exception.catch
+  (Reader.runReaderT app context)
+  (\ (Exception.SomeException exception) -> do
+    say $ "[tmp] uncaught exception: " <> showText exception
+    throw exception)
 
 
 runMigrations :: App ()
@@ -231,9 +235,8 @@ runMigration time migration digest = do
 
 checkMigration :: IO.MonadIO m => Time.LocalTime -> Digest -> Digest -> m ()
 checkMigration time expected actual =
-  IO.liftIO
-    . Monad.when (actual /= expected)
-    . Exception.throwIO
+  Monad.when (actual /= expected)
+    . Exception.throw
     $ MigrationDigestMismatch time expected actual
 
 
