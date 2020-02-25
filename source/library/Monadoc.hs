@@ -924,27 +924,44 @@ sleep = IO.liftIO . Concurrent.threadDelay . round . (1000000 *)
 
 updateHackageIndex :: App LazyByteString.ByteString
 updateHackageIndex = do
+  say "[tmp] preparing to get hackage index"
   request <- Client.parseRequest hackageIndexUrl
+  say "[tmp] getting hackage index"
   response <- performRequestWithEtag request
+  say "[tmp] got hackage index"
+  say $ "[tmp] hackage index size in bytes: " <> (showText . LazyByteString.length $ Client.responseBody response)
   case Http.statusCode $ Client.responseStatus response of
     200 -> do
       let content = Client.responseBody response
+      say "[tmp] inserting hackage index blob"
       digest <- upsertBlob $ LazyByteString.toStrict content
+      say "[tmp] inserted hackage index blob"
+      say $ "[tmp] hackage index digest is: " <> showText digest
+      say "[tmp] inserting hackage index file"
       upsertFile hackageIndexFileName digest
+      say "[tmp] inserted hackage index file"
       pure content
     304 -> do
       digest <- do
+        say "[tmp] getting hackage index digest"
         rows <- sqlQuery
           "select digest from files where name = ?"
           [hackageIndexFileName]
+        say "[tmp] got hackage index digest"
         case rows of
           row : _ -> pure $ Sql.fromOnly row
           _ -> fail $ "missing index file: " <> show response
+      say $ "[tmp] hackage index digest is: " <> showText digest
+      say "[tmp] getting hackage index content"
       rows <- sqlQuery
         "select content from blobs where digest = ?"
         [digest :: Digest]
+      say "[tmp] got hackage index content"
       case rows of
-        row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
+        row : _ -> do
+          let content = Sql.fromBinary $ Sql.fromOnly row
+          say $ "[tmp] hackage index size in bytes: " <> showText (LazyByteString.length content)
+          pure content
         _ -> fail $ "missing index blob: " <> show response
     _ -> fail $ "failed to get Hackage index: " <> show response
 
