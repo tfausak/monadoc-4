@@ -939,18 +939,13 @@ updateHackageIndex = do
           [hackageIndexFileName]
         case rows of
           row : _ -> pure $ Sql.fromOnly row
-          _ -> do
-            sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
-            fail $ "missing index file: " <> show response
+          _ -> fail $ "missing index file: " <> show response
       rows <- sqlQuery
         "select content from blobs where digest = ?"
         [digest :: Digest]
       case rows of
         row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
-        _ -> do
-          sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
-          sqlExecute "delete from files where name = ?" [hackageIndexFileName]
-          fail $ "missing index blob: " <> show response
+        _ -> fail $ "missing index blob: " <> show response
     _ -> fail $ "failed to get Hackage index: " <> show response
 
 
