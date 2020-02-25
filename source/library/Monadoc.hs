@@ -181,11 +181,7 @@ type App = Reader.ReaderT Context IO
 
 
 runApp :: Context -> App a -> IO a
-runApp context app = Exception.catch
-  (Reader.runReaderT app context)
-  (\ (Exception.SomeException exception) -> do
-    say $ "[tmp] uncaught exception: " <> showText exception
-    throw exception)
+runApp = flip Reader.runReaderT
 
 
 runMigrations :: App ()
@@ -235,8 +231,9 @@ runMigration time migration digest = do
 
 checkMigration :: IO.MonadIO m => Time.LocalTime -> Digest -> Digest -> m ()
 checkMigration time expected actual =
-  Monad.when (actual /= expected)
-    . Exception.throw
+  IO.liftIO
+    . Monad.when (actual /= expected)
+    . Exception.throwIO
     $ MigrationDigestMismatch time expected actual
 
 
@@ -927,46 +924,29 @@ sleep = IO.liftIO . Concurrent.threadDelay . round . (1000000 *)
 
 updateHackageIndex :: App LazyByteString.ByteString
 updateHackageIndex = do
-  say "[tmp] preparing to get hackage index"
   request <- Client.parseRequest hackageIndexUrl
-  say "[tmp] getting hackage index"
   response <- performRequestWithEtag request
-  say "[tmp] got hackage index"
-  say $ "[tmp] hackage index size in bytes: " <> (showText . LazyByteString.length $ Client.responseBody response)
   case Http.statusCode $ Client.responseStatus response of
     200 -> do
       let content = Client.responseBody response
-      say "[tmp] inserting hackage index blob"
       digest <- upsertBlob $ LazyByteString.toStrict content
-      say "[tmp] inserted hackage index blob"
-      say $ "[tmp] hackage index digest is: " <> showText digest
-      say "[tmp] inserting hackage index file"
       upsertFile hackageIndexFileName digest
-      say "[tmp] inserted hackage index file"
       pure content
     304 -> do
       digest <- do
-        say "[tmp] getting hackage index digest"
         rows <- sqlQuery
           "select digest from files where name = ?"
           [hackageIndexFileName]
-        say "[tmp] got hackage index digest"
         case rows of
           row : _ -> pure $ Sql.fromOnly row
           _ -> do
             sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
             fail $ "missing index file: " <> show response
-      say $ "[tmp] hackage index digest is: " <> showText digest
-      say "[tmp] getting hackage index content"
       rows <- sqlQuery
         "select content from blobs where digest = ?"
         [digest :: Digest]
-      say "[tmp] got hackage index content"
       case rows of
-        row : _ -> do
-          let content = Sql.fromBinary $ Sql.fromOnly row
-          say $ "[tmp] hackage index size in bytes: " <> showText (LazyByteString.length content)
-          pure content
+        row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
         _ -> do
           sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
           sqlExecute "delete from files where name = ?" [hackageIndexFileName]
