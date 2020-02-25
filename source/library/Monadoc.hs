@@ -231,10 +231,10 @@ runMigration time migration digest = do
 
 checkMigration :: IO.MonadIO m => Time.LocalTime -> Digest -> Digest -> m ()
 checkMigration time expected actual =
-  IO.liftIO
-    . Monad.when (actual /= expected)
-    . Exception.throwIO
-    $ MigrationDigestMismatch time expected actual
+  Monad.when (actual /= expected) . throw $ MigrationDigestMismatch
+    time
+    expected
+    actual
 
 
 migrations :: [(Time.LocalTime, Sql.Query)]
