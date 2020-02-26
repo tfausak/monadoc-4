@@ -840,7 +840,6 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
-  Monad.forever $ sleep 60 -- TODO
   Monad.forever $ do
     say "[worker] starting loop"
     -- TODO: Remove orphaned blobs.
@@ -850,13 +849,14 @@ runWorker = do
     sleep 60
 
 
-processHackageIndex :: LazyByteString.ByteString -> App ()
+processHackageIndex :: ByteString.ByteString -> App ()
 processHackageIndex contents = do
   rangesVar <- IO.liftIO $ Stm.newTVarIO Map.empty
   mapM_ (processTarElement rangesVar)
     . Tar.foldEntries ((:) . Right) [] (pure . Left)
     . Tar.read
-    $ Gzip.decompress contents
+    . Gzip.decompress
+    $ LazyByteString.fromStrict contents
   ranges <- IO.liftIO $ Stm.readTVarIO rangesVar
   Monad.void
     . sqlHelper
@@ -923,14 +923,14 @@ sleep :: IO.MonadIO m => Double -> m ()
 sleep = IO.liftIO . Concurrent.threadDelay . round . (1000000 *)
 
 
-updateHackageIndex :: App LazyByteString.ByteString
+updateHackageIndex :: App ByteString.ByteString
 updateHackageIndex = do
   request <- Client.parseRequest hackageIndexUrl
   response <- performRequestWithEtag request
   case Http.statusCode $ Client.responseStatus response of
     200 -> do
-      let content = Client.responseBody response
-      digest <- upsertBlob $ LazyByteString.toStrict content
+      let content = LazyByteString.toStrict $ Client.responseBody response
+      digest <- upsertBlob content
       upsertFile hackageIndexFileName digest
       pure content
     304 -> do

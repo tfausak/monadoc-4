@@ -46,8 +46,11 @@ library
   exposed-modules: Monadoc
   ghc-options:
     -Weverything
+    -Wno-all-missed-specialisations
     -Wno-implicit-prelude
+    -Wno-missed-specialisations
     -Wno-missing-deriving-strategies
+    -Wno-missing-exported-signatures
     -Wno-safe
     -Wno-unsafe
   hs-source-dirs: source/library
