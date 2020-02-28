@@ -86,6 +86,7 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       GroupDescription: allows everything
+      GroupName: !Ref Name
       SecurityGroupEgress:
         CidrIp: 0.0.0.0/0
         IpProtocol: -1
@@ -191,6 +192,7 @@ Resources:
   LoadBalancer: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-loadbalancer.html
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
+      Name: !Ref Name
       SecurityGroups:
         - !Ref SecurityGroup
       Subnets:
@@ -201,6 +203,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckPath: /health-check
+      Name: !Ref Name
       Port: !Ref Port
       Protocol: HTTP
       TargetType: ip
@@ -349,6 +352,7 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: both private subnets
+      DBSubnetGroupName: !Ref Name
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
@@ -360,6 +364,7 @@ Resources:
       AvailabilityZone: us-east-1a
       BackupRetentionPeriod: 7
       DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: !Ref Name
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       Engine: postgres
       EngineVersion: 11.6
@@ -422,6 +427,7 @@ Resources:
             Effect: Allow
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      RoleName: !Sub '${Name}-task'
 
   Task: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ecs-taskdefinition.html
     Type: AWS::ECS::TaskDefinition
@@ -527,6 +533,7 @@ Resources:
                   - ecr:*
                   - s3:*
                 Effect: Allow
+      RoleName: !Sub '${Name}-code-build'
 
   Project: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html
     Type: AWS::CodeBuild::Project
