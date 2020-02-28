@@ -298,8 +298,7 @@ Resources:
       Name: !Ref WwwDomain
       Type: A
 
-  # TODO: Rename this to `ApexBucket`.
-  Bucket: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket.html
+  ApexBucket: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket.html
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: PublicRead
@@ -331,7 +330,7 @@ Resources:
         Origins:
           - CustomOriginConfig:
               OriginProtocolPolicy: http-only
-            DomainName: !Select [ 1, !Split [ "//", !GetAtt Bucket.WebsiteURL ] ]
+            DomainName: !Select [ 1, !Split [ "//", !GetAtt ApexBucket.WebsiteURL ] ]
             Id: !Ref ApexDomain
         ViewerCertificate:
           AcmCertificateArn: !Ref ApexCertificate
@@ -400,8 +399,7 @@ Resources:
             ]
           }
 
-  # TODO: Rename this to `TaskLogGroup`.
-  LogGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
+  TaskLogGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Ref Name
@@ -412,8 +410,7 @@ Resources:
     Properties:
       ClusterName: !Ref Name
 
-  # TODO: Rename this to `TaskRole`.
-  Role: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+  TaskRole: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -452,7 +449,6 @@ Resources:
               Value: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterPassword}}'
             - Name: PGPORT
               Value: !GetAtt Database.Endpoint.Port
-            # TODO: Use a different PostgreSQL user.
             - Name: PGUSER
               Value: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterUsername}}'
           Essential: true
@@ -461,13 +457,13 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-region: us-east-1
-              awslogs-group: !Ref LogGroup
+              awslogs-group: !Ref TaskLogGroup
               awslogs-stream-prefix: !Ref Commit
           Name: !Ref Name
           PortMappings:
             - ContainerPort: !Ref Port
       Cpu: 256
-      ExecutionRoleArn: !Ref Role
+      ExecutionRoleArn: !Ref TaskRole
       Family: !Ref Name
       Memory: 512
       NetworkMode: awsvpc
