@@ -56,6 +56,17 @@ library
   hs-source-dirs: source/library
   other-modules: Paths_monadoc
 
+test-suite test
+  build-depends:
+    base
+    , hspec >= 2.7.1 && < 2.8
+    , monadoc
+  default-language: Haskell98
+  ghc-options: -rtsopts -threaded
+  hs-source-dirs: source/test-suite
+  main-is: Main.hs
+  type: exitcode-stdio-1.0
+
 executable monadoc
   build-depends: base, monadoc
   default-language: Haskell98
