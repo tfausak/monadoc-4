@@ -1,7 +1,4 @@
 /dist-newstyle/
-/docker/data/
-/docker/monadoc
-/.stack/
 /.stack-work/
 /stack.yaml.lock
 /.vscode/
