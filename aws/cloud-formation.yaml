@@ -365,6 +365,7 @@ Resources:
       BackupRetentionPeriod: 7
       DBInstanceClass: db.t3.micro
       DBInstanceIdentifier: !Ref Name
+      DBName: !Ref Name
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       Engine: postgres
       EngineVersion: 11.6
