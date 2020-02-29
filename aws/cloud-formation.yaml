@@ -497,13 +497,13 @@ Resources:
     Properties:
       BucketName: !Ref Name
 
-  ProjectLogGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
+  CodeBuildLogGroup: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '${Name}-code-build'
       RetentionInDays: 30
 
-  ProjectRole: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+  CodeBuildRole: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -533,7 +533,7 @@ Resources:
                 Effect: Allow
       RoleName: !Sub '${Name}-code-build'
 
-  Project: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html
+  CodeBuildProject: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html
     Type: AWS::CodeBuild::Project
     Properties:
       Artifacts:
@@ -552,11 +552,11 @@ Resources:
         Type: LINUX_CONTAINER
       LogsConfig:
         CloudWatchLogs:
-          GroupName: !Ref ProjectLogGroup
+          GroupName: !Ref CodeBuildLogGroup
           Status: ENABLED
           StreamName: !Ref Commit
       Name: !Ref Name
-      ServiceRole: !Ref ProjectRole
+      ServiceRole: !Ref CodeBuildRole
       Source:
         Auth:
           Type: OAUTH
@@ -602,7 +602,7 @@ Resources:
                 Provider: CodeBuild
                 Version: 1
               Configuration:
-                ProjectName: !Ref Project
+                ProjectName: !Ref CodeBuildProject
                 PrimarySource: SourceArtifact
               InputArtifacts:
                 - Name: SourceArtifact
