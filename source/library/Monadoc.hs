@@ -278,6 +278,8 @@ migrations =
     "create table virtual_files (\
     \name text primary key, \
     \oid oid references large_objects)"
+  , makeMigration (2020, 2, 29, 16, 27, 0) "drop table files"
+  , makeMigration (2020, 2, 29, 16, 28, 0) "drop table blobs"
   ]
 
 
@@ -852,10 +854,8 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
-  Monad.void . Monad.forever $ sleep 60 -- TODO
   Monad.forever $ do
     say "[worker] starting loop"
-    -- TODO: Remove orphaned blobs.
     contents <- updateHackageIndex
     processHackageIndex contents
     say "[worker] finished loop"
@@ -942,48 +942,26 @@ updateHackageIndex = do
   case Http.statusCode $ Client.responseStatus response of
     200 -> do
       let content = Client.responseBody response
-      digest <- upsertBlob $ LazyByteString.toStrict content
       oid <- upsertLargeObject $ LazyByteString.toStrict content
-      upsertFile hackageIndexFileName digest
       upsertVirtualFile hackageIndexFileName oid
       pure content
     304 -> do
-      digest <- do
-        rows <- sqlQuery
-          "select digest from files where name = ?"
-          [hackageIndexFileName]
-        case rows of
-          row : _ -> pure $ Sql.fromOnly row
-          _ -> do
-            sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
-            fail $ "missing index file: " <> show response
-      rows <- sqlQuery
-        "select content from blobs where digest = ?"
-        [digest :: Digest]
-      case rows of
-        row : _ -> pure . Sql.fromBinary $ Sql.fromOnly row
-        _ -> do
+      maybeOid <- selectVirtualFile hackageIndexFileName
+      case maybeOid of
+        Nothing -> do
           sqlExecute "delete from responses where url = ?" [hackageIndexUrl]
-          sqlExecute "delete from files where name = ?" [hackageIndexFileName]
-          fail $ "missing index blob: " <> show response
+          fail $ "missing index file: " <> show response
+        Just oid -> do
+          maybeContent <- selectLargeObject oid
+          case maybeContent of
+            Nothing -> do
+              sqlExecute
+                "delete from responses where url = ?"
+                [hackageIndexUrl]
+              deleteVirtualFile hackageIndexFileName
+              fail $ "missing index blob: " <> show response
+            Just content -> pure $ LazyByteString.fromStrict content
     _ -> fail $ "failed to get Hackage index: " <> show response
-
-
-upsertFile :: Text.Text -> Digest -> App ()
-upsertFile name digest = sqlExecute
-  "insert into files (name, digest) values (?, ?) \
-  \on conflict (name) do update set digest = excluded.digest"
-  (name, digest)
-
-
-upsertBlob :: ByteString.ByteString -> App Digest
-upsertBlob content = do
-  let digest = makeDigest content
-  sqlExecute
-    "insert into blobs (digest, size, content) values (?, ?, ?) \
-    \on conflict (digest) do nothing"
-    (digest, ByteString.length content, Sql.Binary content)
-  pure digest
 
 
 performRequestWithEtag
@@ -1088,6 +1066,21 @@ deleteLargeObject oid = do
       sqlExecute "delete from large_objects where oid = ?" [oid]
 
 
+selectLargeObject :: Sql.Oid -> App (Maybe ByteString.ByteString)
+selectLargeObject oid = do
+  context <- Reader.ask
+  IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
+    Sql.withTransaction connection . runApp context $ do
+      rows <- sqlQuery "select size from large_objects where oid = ?" [oid]
+      case rows of
+        [] -> pure Nothing
+        row : _ -> IO.liftIO $ do
+          handle <- Sql.loOpen connection oid Sql.ReadMode
+          content <- Sql.loRead connection handle $ Sql.fromOnly row
+          Sql.loClose connection handle
+          pure $ Just content
+
+
 upsertVirtualFile :: Text.Text -> Sql.Oid -> App ()
 upsertVirtualFile name newOid = do
   context <- Reader.ask
@@ -1115,3 +1108,8 @@ selectVirtualFile name = do
   pure $ case rows of
     [] -> Nothing
     row : _ -> Just $ Sql.fromOnly row
+
+
+deleteVirtualFile :: Text.Text -> App ()
+deleteVirtualFile name =
+  sqlExecute "delete from virtual_files where name = ?" [name]
