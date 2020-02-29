@@ -273,6 +273,11 @@ migrations =
     \oid oid primary key, \
     \digest bytea not null unique, \
     \size integer not null)"
+  , makeMigration
+    (2020, 2, 29, 12, 7, 0)
+    "create table virtual_files (\
+    \name text primary key, \
+    \oid oid references large_objects)"
   ]
 
 
@@ -938,8 +943,9 @@ updateHackageIndex = do
     200 -> do
       let content = Client.responseBody response
       digest <- upsertBlob $ LazyByteString.toStrict content
-      _oid <- upsertLargeObject $ LazyByteString.toStrict content
+      oid <- upsertLargeObject $ LazyByteString.toStrict content
       upsertFile hackageIndexFileName digest
+      upsertVirtualFile hackageIndexFileName oid
       pure content
     304 -> do
       digest <- do
@@ -1055,8 +1061,9 @@ upsertLargeObject content = do
   IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
     Sql.withTransaction connection . runApp context $ do
       let digest = makeDigest content
-      rows <- sqlQuery "select oid from large_objects where digest = ?"
-        $ Sql.Only digest
+      rows <- sqlQuery
+        "select oid from large_objects where digest = ?"
+        [digest]
       case rows of
         row : _ -> pure $ Sql.fromOnly row
         [] -> do
@@ -1070,3 +1077,26 @@ upsertLargeObject content = do
             "insert into large_objects (oid, digest, size) values (?, ?, ?)"
             (oid, digest, ByteString.length content)
           pure oid
+
+
+upsertVirtualFile :: Text.Text -> Sql.Oid -> App ()
+upsertVirtualFile name newOid = do
+  context <- Reader.ask
+  IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
+    Sql.withTransaction connection . runApp context $ do
+      oidRows <- sqlQuery "select oid from virtual_files where name = ?" [name]
+      case oidRows of
+        [] -> pure ()
+        Sql.Only oldOid : _ -> do
+          countRows <- sqlQuery
+            "select count(*) from virtual_files where oid = ?"
+            [oldOid]
+          case countRows of
+            [Sql.Only count] | count == (1 :: Int) -> do
+              IO.liftIO $ Sql.loUnlink connection oldOid
+              sqlExecute "delete from large_objects where oid = ?" [oldOid]
+            _ -> pure ()
+          sqlExecute "delete from virtual_files where name = ?" [name]
+      sqlExecute
+        "insert into virtual_files (name, oid) values (?, ?)"
+        (name, newOid)
