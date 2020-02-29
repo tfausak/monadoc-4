@@ -357,6 +357,22 @@ Resources:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
 
+  DatabaseMonitoringRole: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Principal:
+              Service:
+                - rds.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Effect: Allow
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      RoleName: !Sub '${Name}-database-monitoring'
+
   Database: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-rds-database-instance.html
     Type: AWS::RDS::DBInstance
     Properties:
@@ -372,8 +388,7 @@ Resources:
       MasterUsername: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterUsername}}'
       MasterUserPassword: '{{resolve:secretsmanager:PostgreSQL:SecretString:MasterPassword}}'
       MonitoringInterval: 60
-      # TODO: Manage this service role in CloudFormation.
-      MonitoringRoleArn: arn:aws:iam::014479108335:role/rds-monitoring-role
+      MonitoringRoleArn: !Ref DatabaseMonitoringRole
       StorageEncrypted: true
       StorageType: gp2
       VPCSecurityGroups:
