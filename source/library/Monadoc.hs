@@ -37,6 +37,7 @@ import qualified Data.Version as Version
 import qualified Database.PostgreSQL.Simple as Sql
 import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
 import qualified Database.PostgreSQL.Simple.FromRow as Sql
+import qualified Database.PostgreSQL.Simple.LargeObjects as Sql
 import qualified Database.PostgreSQL.Simple.ToField as Sql
 import qualified Database.PostgreSQL.Simple.ToRow as Sql
 import qualified Database.PostgreSQL.Simple.Types as Sql
@@ -266,6 +267,12 @@ migrations =
     "create table preferred_versions (\
     \package text primary key, \
     \range text not null)"
+  , makeMigration
+    (2020, 2, 29, 11, 53, 0)
+    "create table large_objects (\
+    \oid oid primary key, \
+    \digest bytea not null unique, \
+    \size integer not null)"
   ]
 
 
@@ -840,7 +847,7 @@ replaceHeaders new old = foldr replaceHeader old new
 runWorker :: App ()
 runWorker = do
   say "[worker] initializing"
-  Monad.forever $ sleep 60 -- TODO
+  Monad.void . Monad.forever $ sleep 60 -- TODO
   Monad.forever $ do
     say "[worker] starting loop"
     -- TODO: Remove orphaned blobs.
@@ -931,6 +938,7 @@ updateHackageIndex = do
     200 -> do
       let content = Client.responseBody response
       digest <- upsertBlob $ LazyByteString.toStrict content
+      _oid <- upsertLargeObject $ LazyByteString.toStrict content
       upsertFile hackageIndexFileName digest
       pure content
     304 -> do
@@ -1039,3 +1047,26 @@ formatDuration = Text.pack . Printf.printf "%.3f"
 
 formatQuery :: Sql.Query -> Text.Text
 formatQuery = fromUtf8 . Sql.fromQuery
+
+
+upsertLargeObject :: ByteString.ByteString -> App Sql.Oid
+upsertLargeObject content = do
+  context <- Reader.ask
+  IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
+    Sql.withTransaction connection . runApp context $ do
+      let digest = makeDigest content
+      rows <- sqlQuery "select oid from large_objects where digest = ?"
+        $ Sql.Only digest
+      case rows of
+        row : _ -> pure $ Sql.fromOnly row
+        [] -> do
+          oid <- IO.liftIO $ do
+            oid <- Sql.loCreat connection
+            handle <- Sql.loOpen connection oid Sql.WriteMode
+            Monad.void $ Sql.loWrite connection handle content
+            Sql.loClose connection handle
+            pure oid
+          sqlExecute
+            "insert into large_objects (oid, digest, size) values (?, ?, ?)"
+            (oid, digest, ByteString.length content)
+          pure oid
