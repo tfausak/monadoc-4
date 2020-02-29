@@ -703,6 +703,30 @@ Resources:
                 Resource: '*'
       RoleName: !Sub '${Name}-code-pipeline'
 
+  CloudFormationRole: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Effect: Allow
+      Policies:
+        - PolicyName: default
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - '*'
+                Action:
+                  - '*'
+                Effect: Allow
+      RoleName: !Sub '${Name}-cloud-formation'
+
   Pipeline: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-pipeline.html
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -755,8 +779,7 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 StackName: !Ref Name
                 Capabilities: CAPABILITY_IAM
-                # TODO: Manage this service role in CloudFormation.
-                RoleArn: arn:aws:iam::014479108335:role/monadoc-test-pipeline-cloud-formation
+                RoleArn: !Ref CloudFormationRole
                 TemplatePath: 'BuildArtifact::aws/cloud-formation.yaml'
                 TemplateConfiguration: 'BuildArtifact::aws/configuration.json'
               InputArtifacts:
