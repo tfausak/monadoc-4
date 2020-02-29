@@ -1079,6 +1079,15 @@ upsertLargeObject content = do
           pure oid
 
 
+deleteLargeObject :: Sql.Oid -> App ()
+deleteLargeObject oid = do
+  context <- Reader.ask
+  IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
+    Sql.withTransaction connection . runApp context $ do
+      IO.liftIO $ Sql.loUnlink connection oid
+      sqlExecute "delete from large_objects where oid = ?" [oid]
+
+
 upsertVirtualFile :: Text.Text -> Sql.Oid -> App ()
 upsertVirtualFile name newOid = do
   context <- Reader.ask
@@ -1092,9 +1101,7 @@ upsertVirtualFile name newOid = do
             "select count(*) from virtual_files where oid = ?"
             [oldOid]
           case countRows of
-            [Sql.Only count] | count == (1 :: Int) -> do
-              IO.liftIO $ Sql.loUnlink connection oldOid
-              sqlExecute "delete from large_objects where oid = ?" [oldOid]
+            [Sql.Only count] | count == (1 :: Int) -> deleteLargeObject oldOid
             _ -> pure ()
           sqlExecute "delete from virtual_files where name = ?" [name]
       sqlExecute
