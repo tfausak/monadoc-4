@@ -437,7 +437,7 @@ setCookieHeader context maybeGitHubUser = case maybeGitHubUser of
         [ cookieName
         , "="
         , Uuid.toText $ gitHubUserGuid gitHubUser
-        , "; HttpOnly; SameSite=Strict"
+        , "; HttpOnly; Path=/; SameSite=Strict"
         , if isHttps . configUrl $ contextConfig context
           then "; Secure"
           else ""
