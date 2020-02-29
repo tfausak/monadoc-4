@@ -1093,17 +1093,25 @@ upsertVirtualFile name newOid = do
   context <- Reader.ask
   IO.liftIO . Pool.withResource (contextPool context) $ \connection ->
     Sql.withTransaction connection . runApp context $ do
-      oidRows <- sqlQuery "select oid from virtual_files where name = ?" [name]
-      case oidRows of
-        [] -> pure ()
-        Sql.Only oldOid : _ -> do
-          countRows <- sqlQuery
+      maybeOldOid <- selectVirtualFile name
+      case maybeOldOid of
+        Nothing -> pure ()
+        Just oldOid -> do
+          rows <- sqlQuery
             "select count(*) from virtual_files where oid = ?"
             [oldOid]
-          case countRows of
+          case rows of
             [Sql.Only count] | count == (1 :: Int) -> deleteLargeObject oldOid
             _ -> pure ()
           sqlExecute "delete from virtual_files where name = ?" [name]
       sqlExecute
         "insert into virtual_files (name, oid) values (?, ?)"
         (name, newOid)
+
+
+selectVirtualFile :: Text.Text -> App (Maybe Sql.Oid)
+selectVirtualFile name = do
+  rows <- sqlQuery "select oid from virtual_files where name = ?" [name]
+  pure $ case rows of
+    [] -> Nothing
+    row : _ -> Just $ Sql.fromOnly row
