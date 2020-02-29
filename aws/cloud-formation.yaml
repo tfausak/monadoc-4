@@ -538,12 +538,9 @@ Resources:
               - Resource:
                   - '*'
                 Action:
-                  - ecr:DescribeImages
-                  - ecr:DescribeRepositories
+                  - ecr:*
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                  # TODO: Tighten up these permissions.
-                  - ecr:*
                   - s3:*
                 Effect: Allow
       RoleName: !Sub '${Name}-code-build'
