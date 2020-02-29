@@ -3,6 +3,7 @@ module Main
   )
 where
 
+import qualified Control.Exception as Exception
 import qualified Control.Monad.Trans.Maybe as MaybeT
 import qualified Data.List as List
 import qualified Data.Maybe as Maybe
@@ -10,6 +11,7 @@ import qualified Data.Text.IO as Text
 import qualified Language.Haskell.Brittany as Brittany
 import qualified Language.Haskell.HLint4 as Hlint
 import qualified System.Directory as Directory
+import qualified System.Environment as Environment
 import qualified System.FilePath as FilePath
 import qualified Test.Hspec as Hspec
 
@@ -26,7 +28,8 @@ main = Hspec.hspec $ do
 brittany :: Brittany.Config -> FilePath -> Hspec.Spec
 brittany config file = Hspec.it file $ do
   actual <- Text.readFile file
-  result <- Brittany.parsePrintModule config actual
+  result <- withEnv "GHC_ENVIRONMENT" "-"
+    $ Brittany.parsePrintModule config actual
   case result of
     Left brittanyError ->
       fail . unlines $ fmap showBrittanyError brittanyError
@@ -36,6 +39,18 @@ hlint :: FilePath -> Hspec.Spec
 hlint file = Hspec.it file $ do
   ideas <- Hlint.hlint ["--quiet", file]
   ideas `Hspec.shouldSatisfy` null
+
+withEnv :: String -> String -> IO a -> IO a
+withEnv name newValue =
+  let
+    acquire = do
+      maybeOldValue <- Environment.lookupEnv name
+      Environment.setEnv name newValue
+      pure maybeOldValue
+    release maybeOldValue = case maybeOldValue of
+      Nothing -> Environment.unsetEnv name
+      Just oldValue -> Environment.setEnv name oldValue
+  in Exception.bracket acquire release . const
 
 showBrittanyError :: Brittany.BrittanyError -> String
 showBrittanyError brittanyError = case brittanyError of
