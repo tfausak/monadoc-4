@@ -16,10 +16,11 @@
 
 # NOTE: CodePipeline requires a GitHub Personal Access Token to be stored in
 # the Secrets Manager. This is not managed by CloudFormation and must be done
-# in the console.
+# in the console. (Secret name: GitHub. Secret key: PersonalAccessToken.)
 
 # NOTE: RDS instances take about 10 minutes to come up. Also they require a
-# master username and password to be stored in the Secrets Manager.
+# master username and password to be stored in the Secrets Manager. (Secret
+# name: PostgreSQL. Secret keys: MasterUsername, MasterPassword.)
 
 Parameters:
 
