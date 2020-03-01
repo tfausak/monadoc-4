@@ -10,16 +10,37 @@ cache:
 phases:
   install:
     commands:
-      - aws/phases/install.sh
+      - yum install --assumeyes gcc gmp-devel gzip make ncurses-devel perl postgresql-devel tar xz zlib-devel
+      - if test ! -f /usr/local/bin/ghcup; then
+        curl --output /usr/local/bin/ghcup https://gitlab.haskell.org/haskell/ghcup/uploads/9f278318810f652a59b1784c2295fa91/ghcup &&
+        chmod +x /usr/local/bin/ghcup; fi
+      - if test ! -f ~/.ghcup/bin/ghc; then
+        ghcup install 8.8.2 &&
+        ghcup set 8.8.2; fi
+      - if test ! -f ~/.ghcup/bin/cabal; then
+        ghcup install-cabal 3.0.0.0; fi
   pre_build:
     commands:
-      - aws/phases/pre_build.sh
+      - export PATH="$HOME/.cabal/bin:$HOME/.ghcup/bin:$PATH"
+      - ghcup --version
+      - ghc --version
+      - cabal --version
+      - cabal update
+      - eval "$( aws ecr get-login --no-include-email )"
   build:
     commands:
-      - aws/phases/build.sh
+      - cabal test --jobs
+      - cabal install --install-method copy --installdir docker
+      - cp --recursive --verbose data docker
+      - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
+      - tag="$url:$CODEBUILD_RESOLVED_SOURCE_VERSION"
+      - docker build --build-arg "COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION" --tag "$tag" docker
   post_build:
     commands:
-      - aws/phases/post_build.sh
+      - test "$CODEBUILD_BUILD_SUCCEEDING" = 1
+      - if ! aws ecr describe-images --image-ids "imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION" --repository-name monadoc; then
+        docker push "$tag"; fi
+      - printf '{"Parameters":{"Commit":"%s"}}\n' "$CODEBUILD_RESOLVED_SOURCE_VERSION" | tee aws/configuration.json
 
 artifacts:
   files:
