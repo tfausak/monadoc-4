@@ -725,6 +725,11 @@ Resources:
                 Action:
                   - '*'
                 Effect: Allow
+              - Resource:
+                  - '*'
+                Action:
+                  - iam:PassRole
+                Effect: Allow
       RoleName: !Sub '${Name}-cloud-formation'
 
   Pipeline: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-pipeline.html
