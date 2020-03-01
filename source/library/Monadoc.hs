@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Monadoc
-  ( main
+  ( monadoc
   )
 where
 
@@ -66,8 +66,8 @@ import qualified Text.Read as Read
 import qualified Web.Cookie as Cookie
 
 
-main :: IO ()
-main = do
+monadoc :: IO ()
+monadoc = do
   say "initializing"
   config <- getConfig
   context <- makeContext config
