@@ -29,7 +29,7 @@ phases:
       - eval "$( aws ecr get-login --no-include-email )"
   build:
     commands:
-      - cabal test --jobs
+      - cabal test
       - cabal install --install-method copy --installdir docker
       - cp --recursive --verbose data docker
       - url="$( aws ecr describe-repositories --output text --query 'repositories[0].repositoryUri' --repository-names monadoc )"
