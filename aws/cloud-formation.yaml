@@ -465,7 +465,7 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref Port
       Cpu: 256
-      ExecutionRoleArn: !Ref TaskRole
+      ExecutionRoleArn: !GetAtt TaskRole.Arn
       Family: !Ref Name
       Memory: 1024
       NetworkMode: awsvpc
