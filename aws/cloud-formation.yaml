@@ -476,7 +476,7 @@ Resources:
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref Cluster
-      DesiredCount: 1
+      DesiredCount: 0
       LaunchType: FARGATE
       LoadBalancers:
         - ContainerName: !Ref Name
