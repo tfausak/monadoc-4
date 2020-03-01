@@ -467,7 +467,7 @@ Resources:
       Cpu: 256
       ExecutionRoleArn: !Ref TaskRole
       Family: !Ref Name
-      Memory: 512
+      Memory: 1024
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
