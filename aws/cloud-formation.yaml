@@ -734,7 +734,7 @@ Resources:
         Location: !Ref MainBucket
         Type: S3
       Name: !Ref Name
-      RoleArn: !Ref PipelineRole
+      RoleArn: !GetAtt PipelineRole.Arn
       Stages:
         - Name: Source
           Actions:
