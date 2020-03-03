@@ -43,6 +43,7 @@ import qualified Database.PostgreSQL.Simple.ToRow as Sql
 import qualified Database.PostgreSQL.Simple.Types as Sql
 import qualified Distribution.Parsec as Cabal
 import qualified Distribution.Pretty as Cabal
+import qualified Distribution.Types.PackageId as Cabal
 import qualified Distribution.Types.PackageName as Cabal
 import qualified Distribution.Types.PackageVersionConstraint as Cabal
 import qualified Distribution.Types.Version as Cabal
@@ -56,6 +57,7 @@ import qualified Network.HTTP.Types.Header as Http
 import qualified Network.URI as Uri
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
+import qualified Numeric.Natural as Natural
 import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
 import qualified System.FilePath as FilePath
@@ -866,7 +868,8 @@ runWorker = do
 processHackageIndex :: LazyByteString.ByteString -> App ()
 processHackageIndex contents = do
   rangesVar <- IO.liftIO $ Stm.newTVarIO Map.empty
-  mapM_ (processTarElement rangesVar)
+  revisionsVar <- IO.liftIO $ Stm.newTVarIO Map.empty
+  mapM_ (processTarElement rangesVar revisionsVar)
     . Tar.foldEntries ((:) . Right) [] (pure . Left)
     . Tar.read
     $ Gzip.decompress contents
@@ -882,9 +885,10 @@ processHackageIndex contents = do
 
 processTarElement
   :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
+  -> Stm.TVar (Map.Map Cabal.PackageIdentifier Natural.Natural)
   -> Either Tar.FormatError Tar.Entry
   -> App ()
-processTarElement ranges element = case element of
+processTarElement ranges revisions element = case element of
   Left formatError -> throw formatError
   Right entry -> case Tar.entryContent entry of
     Tar.NormalFile lazyContent _ ->
@@ -909,10 +913,36 @@ processTarElement ranges element = case element of
                   _time =
                     Time.posixSecondsToUTCTime . fromIntegral $ Tar.entryTime
                       entry
-                  _packageName = Cabal.mkPackageName package
-                _version <- case Cabal.simpleParsec versionString of
+                  packageName = Cabal.mkPackageName package
+                version <- case Cabal.simpleParsec versionString of
                   Nothing -> fail $ "invalid package version: " <> show entry
                   Just version -> pure (version :: Cabal.Version)
+                let packageId = Cabal.PackageIdentifier packageName version
+                revision <-
+                  IO.liftIO
+                  . fmap (Map.findWithDefault 0 packageId)
+                  $ Stm.readTVarIO revisions
+                IO.liftIO
+                  . Stm.atomically
+                  . Stm.modifyTVar revisions
+                  $ Map.insertWith (+) packageId 1
+                let
+                  packageNameText =
+                    Text.pack $ Cabal.unPackageName packageName
+                oid <- upsertLargeObject content
+                upsertVirtualFile
+                  (mconcat
+                    [ packageNameText
+                    , "/"
+                    , Text.pack $ Cabal.prettyShow version
+                    , "/"
+                    , showText revision
+                    , "/"
+                    , packageNameText
+                    , ".cabal"
+                    ]
+                  )
+                  oid
                 pure () -- TODO
               (_, ".json") -> pure ()
               _ -> fail $ "unexpected tar extension: " <> show entry
