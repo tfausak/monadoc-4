@@ -282,6 +282,8 @@ migrations =
     \oid oid references large_objects)"
   , makeMigration (2020, 2, 29, 16, 27, 0) "drop table files"
   , makeMigration (2020, 2, 29, 16, 28, 0) "drop table blobs"
+  , makeMigration (2020, 3, 3, 21, 42, 0) "truncate table virtual_files"
+  , makeMigration (2020, 3, 3, 21, 43, 0) "truncate table large_objects"
   ]
 
 
