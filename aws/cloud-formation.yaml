@@ -113,22 +113,11 @@ Resources:
     Properties:
       Domain: vpc
 
-  PublicIpB: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-eip.html
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-
   NatGatewayA: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-natgateway.html
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt PublicIpA.AllocationId
       SubnetId: !Ref PublicSubnetA
-
-  NatGatewayB: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-natgateway.html
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt PublicIpB.AllocationId
-      SubnetId: !Ref PublicSubnetB
 
   PrivateRouteTableA: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-route-table.html
     Type: AWS::EC2::RouteTable
@@ -157,7 +146,7 @@ Resources:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateRouteTableB
-      NatGatewayId: !Ref NatGatewayB
+      NatGatewayId: !Ref NatGatewayA
       DestinationCidrBlock: 0.0.0.0/0
 
   PrivateRouteTableAssociationB: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet-route-table-assoc.html
