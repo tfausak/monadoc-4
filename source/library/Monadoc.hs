@@ -1124,10 +1124,10 @@ upsertVirtualFile name newOid = do
           rows <- sqlQuery
             "select count(*) from virtual_files where oid = ?"
             [oldOid]
+          deleteVirtualFile name
           case rows of
             [Sql.Only count] | count == (1 :: Int) -> deleteLargeObject oldOid
             _ -> pure ()
-          sqlExecute "delete from virtual_files where name = ?" [name]
       sqlExecute
         "insert into virtual_files (name, oid) values (?, ?)"
         (name, newOid)
