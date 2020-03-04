@@ -196,6 +196,9 @@ Resources:
       Name: !Ref Name
       Port: !Ref Port
       Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
       TargetType: ip
       VpcId: !Ref Vpc
 
