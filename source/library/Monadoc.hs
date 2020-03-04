@@ -1121,8 +1121,7 @@ upsertVirtualFile name newOid = do
     Sql.withTransaction connection . runApp context $ do
       maybeOldOid <- selectVirtualFile name
       case maybeOldOid of
-        Nothing -> pure ()
-        Just oldOid -> do
+        Just oldOid | oldOid /= newOid -> do
           rows <- sqlQuery
             "select count(*) from virtual_files where oid = ?"
             [oldOid]
@@ -1130,8 +1129,10 @@ upsertVirtualFile name newOid = do
           case rows of
             [Sql.Only count] | count == (1 :: Int) -> deleteLargeObject oldOid
             _ -> pure ()
+        _ -> pure ()
       sqlExecute
-        "insert into virtual_files (name, oid) values (?, ?)"
+        "insert into virtual_files (name, oid) values (?, ?) \
+        \on conflict (name) do update set oid = excluded.oid"
         (name, newOid)
 
 
