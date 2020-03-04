@@ -1050,12 +1050,8 @@ sqlHelper
   :: (Sql.Connection -> Sql.Query -> q -> IO [r]) -> Sql.Query -> q -> App [r]
 sqlHelper runQuery query substitutions = do
   pool <- Reader.asks contextPool
-  (result, duration) <-
-    IO.liftIO . withDuration . Pool.withResource pool $ \connection ->
-      runQuery connection query substitutions
-  say $ Text.unwords
-    ["[sql]", formatQuery query, "--", formatDuration duration]
-  pure result
+  IO.liftIO . Pool.withResource pool $ \connection ->
+    runQuery connection query substitutions
 
 
 formatDuration :: Double -> Text.Text
