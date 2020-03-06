@@ -946,7 +946,26 @@ processHackageIndex :: LazyByteString.ByteString -> App ()
 processHackageIndex contents = do
   rangesVar <- IO.liftIO $ Stm.newTVarIO Map.empty
   revisionsVar <- IO.liftIO $ Stm.newTVarIO Map.empty
-  mapM_ (processTarElement rangesVar revisionsVar)
+  rows <- sqlQuery
+    "select p.name, p.version, p.revision, lo.digest \
+    \from packages as p \
+    \inner join virtual_files as vf \
+    \on vf.name = p.virtual_file_name \
+    \inner join large_objects as lo \
+    \on lo.oid = vf.oid"
+    ()
+  let
+    digests = Map.fromList $ fmap
+      (\(name, version, revision, digest) ->
+        ( ( Cabal.mkPackageName name
+          , Cabal.mkVersion $ Vector.toList version
+          , integerToNatural revision
+          )
+        , digest :: Digest
+        )
+      )
+      rows
+  mapM_ (processTarElement rangesVar revisionsVar digests)
     . Tar.foldEntries ((:) . Right) [] (pure . Left)
     . Tar.read
     $ Gzip.decompress contents
@@ -960,12 +979,17 @@ processHackageIndex contents = do
     $ Map.toList ranges
 
 
+integerToNatural :: Integer -> Natural.Natural
+integerToNatural = fromIntegral
+
+
 processTarElement
   :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
   -> Stm.TVar (Map.Map Cabal.PackageIdentifier Natural.Natural)
+  -> Map.Map (Cabal.PackageName, Cabal.Version, Natural.Natural) Digest
   -> Either Tar.FormatError Tar.Entry
   -> App ()
-processTarElement ranges revisions element = case element of
+processTarElement ranges revisions digests element = case element of
   Left formatError -> throw formatError
   Right entry -> case Tar.entryContent entry of
     Tar.NormalFile lazyContent _ ->
@@ -1003,36 +1027,41 @@ processTarElement ranges revisions element = case element of
                   . Stm.atomically
                   . Stm.modifyTVar revisions
                   $ Map.insertWith (+) packageId 1
-                let
-                  packageNameText =
-                    Text.pack $ Cabal.unPackageName packageName
-                  packagePath = mconcat
-                    [ packageNameText
-                    , "/"
-                    , Text.pack $ Cabal.prettyShow version
-                    , "/"
-                    , showText revision
-                    , "/"
-                    , packageNameText
-                    , ".cabal"
-                    ]
-                oid <- upsertLargeObject content
-                upsertVirtualFile packagePath oid
-                sqlExecute
-                  "insert into packages (name, version, revision, hackage_user, uploaded_at, virtual_file_name) \
-                  \values (?, ?, ?, ?, ?, ?) \
-                  \on conflict (name, version, revision) \
-                  \do update set hackage_user = excluded.hackage_user, \
-                  \uploaded_at = excluded.uploaded_at, \
-                  \virtual_file_name = excluded.virtual_file_name"
-                  ( packageNameText
-                  , Vector.fromList $ Cabal.versionNumbers version
-                  , naturalToInteger revision
-                  , owner
-                  , time
-                  , packagePath
-                  )
-                pure () -- TODO
+                let actualDigest = makeDigest content
+                case Map.lookup (packageName, version, revision) digests of
+                  Just expectedDigest | expectedDigest == actualDigest ->
+                    pure ()
+                  _ -> do
+                    let
+                      packageNameText =
+                        Text.pack $ Cabal.unPackageName packageName
+                      packagePath = mconcat
+                        [ packageNameText
+                        , "/"
+                        , Text.pack $ Cabal.prettyShow version
+                        , "/"
+                        , showText revision
+                        , "/"
+                        , packageNameText
+                        , ".cabal"
+                        ]
+                    oid <- upsertLargeObject content
+                    upsertVirtualFile packagePath oid
+                    sqlExecute
+                      "insert into packages (name, version, revision, hackage_user, uploaded_at, virtual_file_name) \
+                      \values (?, ?, ?, ?, ?, ?) \
+                      \on conflict (name, version, revision) \
+                      \do update set hackage_user = excluded.hackage_user, \
+                      \uploaded_at = excluded.uploaded_at, \
+                      \virtual_file_name = excluded.virtual_file_name"
+                      ( packageNameText
+                      , Vector.fromList $ Cabal.versionNumbers version
+                      , naturalToInteger revision
+                      , owner
+                      , time
+                      , packagePath
+                      )
+                    pure () -- TODO
               (_, ".json") -> pure ()
               _ -> fail $ "unexpected tar extension: " <> show entry
           _ -> fail $ "unexpected tar path: " <> show entry
