@@ -496,6 +496,8 @@ application context request respond = do
     ("GET", ["health-check"]) ->
       healthCheckHandler context headers request respond
     ("GET", ["robots.txt"]) -> robotsHandler headers request respond
+    ("GET", ["search"]) ->
+      searchHandler context maybeGitHubUser headers request respond
     ("GET", ["static", "tachyons-4-11-2.css"]) ->
       tachyonsHandler headers request respond
     ("GET", ["github-callback"]) ->
@@ -510,77 +512,111 @@ type Handler
   -> IO Wai.ResponseReceived
 
 
+searchHandler :: Context -> Maybe GitHubUser -> Handler
+searchHandler context maybeGitHubUser headers request respond = do
+  let
+    query =
+      maybe "nothing" fromUtf8 . Monad.join . lookup "q" $ Wai.queryString
+        request
+  names <- runApp context $ sqlQuery
+    "select distinct name from packages where name like ? limit 50"
+    ["%" <> query <> "%"]
+  respond
+    . htmlResponse Http.ok200 headers
+    . htmlTemplate context maybeGitHubUser
+    $ do
+        Lucid.p_ $ "Search results for " <> Lucid.toHtml (show query) <> ":"
+        Lucid.ol_ . Monad.forM_ names $ \name ->
+          Lucid.li_ $ Lucid.toHtml (Sql.fromOnly name :: Text.Text)
+
+
 indexHandler :: Context -> Maybe GitHubUser -> Handler
 indexHandler context maybeGitHubUser headers _ respond =
-  respond . htmlResponse Http.ok200 headers $ do
-    Lucid.doctype_
-    Lucid.html_ [Lucid.lang_ "en-US"] $ do
-      Lucid.head_ $ do
-        Lucid.meta_ [Lucid.charset_ "utf-8"]
-        Lucid.meta_
-          [ Lucid.name_ "viewport"
-          , Lucid.content_ "initial-scale = 1, width = device-width"
+  respond
+    . htmlResponse Http.ok200 headers
+    . htmlTemplate context maybeGitHubUser
+    $ Lucid.p_ "\x1f516 Better Haskell documentation."
+
+
+htmlTemplate :: Context -> Maybe GitHubUser -> Lucid.Html () -> Lucid.Html ()
+htmlTemplate context maybeGitHubUser content = do
+  Lucid.doctype_
+  Lucid.html_ [Lucid.lang_ "en-US"] $ do
+    Lucid.head_ $ do
+      Lucid.meta_ [Lucid.charset_ "utf-8"]
+      Lucid.meta_
+        [ Lucid.name_ "viewport"
+        , Lucid.content_ "initial-scale = 1, width = device-width"
+        ]
+      Lucid.meta_
+        [ Lucid.name_ "description"
+        , Lucid.content_ "\x1f516 Better Haskell documentation."
+        ]
+      Lucid.title_ "Monadoc"
+      Lucid.link_
+        [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
+    Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
+      Lucid.header_
+          [ Lucid.class_
+              "bg-purple flex items-center justify-between pa3 white"
           ]
-        Lucid.meta_
-          [ Lucid.name_ "description"
-          , Lucid.content_ "\x1f516 Better Haskell documentation."
-          ]
-        Lucid.title_ "Monadoc"
-        Lucid.link_
-          [Lucid.rel_ "stylesheet", Lucid.href_ "/static/tachyons-4-11-2.css"]
-      Lucid.body_ [Lucid.class_ "bg-white black sans-serif"] $ do
-        Lucid.header_
-            [ Lucid.class_
-                "bg-purple flex items-center justify-between pa3 white"
-            ]
-          $ do
-              Lucid.h1_ [Lucid.class_ "ma0 normal"] $ Lucid.a_
-                [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
-                "Monadoc"
-              Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
-                Nothing -> Lucid.a_
-                  [ Lucid.class_ "color-inherit no-underline"
-                  , Lucid.href_ $ Text.concat
-                    [ "http://github.com/login/oauth/authorize?client_id="
-                    , configClientId $ contextConfig context
-                    , "&redirect_uri="
-                    , configUrl $ contextConfig context
-                    , "/github-callback"
-                    ]
+        $ do
+            Lucid.h1_ [Lucid.class_ "ma0 normal"] $ Lucid.a_
+              [Lucid.class_ "color-inherit no-underline", Lucid.href_ "/"]
+              "Monadoc"
+            Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
+              Nothing -> Lucid.a_
+                [ Lucid.class_ "color-inherit no-underline"
+                , Lucid.href_ $ Text.concat
+                  [ "http://github.com/login/oauth/authorize?client_id="
+                  , configClientId $ contextConfig context
+                  , "&redirect_uri="
+                  , configUrl $ contextConfig context
+                  , "/github-callback"
                   ]
-                  "Log in with GitHub"
-                Just gitHubUser ->
-                  Lucid.toHtml $ "@" <> gitHubUserLogin gitHubUser
-        Lucid.main_ [Lucid.class_ "pa3"]
-          $ Lucid.p_ "\x1f516 Better Haskell documentation."
-        Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
-          . Lucid.p_ [Lucid.class_ "ma0"]
-          $ do
-              "Powered by "
-              Lucid.a_
-                [ Lucid.class_ "color-inherit"
-                , Lucid.href_ "https://github.com/tfausak/monadoc"
                 ]
-                "Monadoc"
-              " version "
-              Lucid.a_
-                  [ Lucid.class_ "color-inherit"
-                  , Lucid.href_
-                  $ "https://github.com/tfausak/monadoc/releases/tag/"
-                  <> packageVersion
-                  ]
-                $ Lucid.toHtml packageVersion
-              " commit "
-              let commit = configCommit $ contextConfig context
-              Lucid.a_
-                  [ Lucid.class_ "color-inherit"
-                  , Lucid.href_
-                  $ "https://github.com/tfausak/monadoc/commit/"
-                  <> commit
-                  ]
-                . Lucid.toHtml
-                $ Text.take 7 commit
-              "."
+                "Log in with GitHub"
+              Just gitHubUser ->
+                Lucid.toHtml $ "@" <> gitHubUserLogin gitHubUser
+      Lucid.div_ [Lucid.class_ "bg-light-gray pa3"]
+        . Lucid.form_ [Lucid.action_ "/search", Lucid.class_ "flex"]
+        $ do
+            Lucid.input_
+              [ Lucid.class_ "mr3 w-100"
+              , Lucid.name_ "q"
+              , Lucid.placeholder_ "lens"
+              , Lucid.type_ "text"
+              ]
+            Lucid.input_ [Lucid.type_ "submit", Lucid.value_ "Search"]
+      Lucid.main_ [Lucid.class_ "pa3"] content
+      Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
+        . Lucid.p_ [Lucid.class_ "ma0"]
+        $ do
+            "Powered by "
+            Lucid.a_
+              [ Lucid.class_ "color-inherit"
+              , Lucid.href_ "https://github.com/tfausak/monadoc"
+              ]
+              "Monadoc"
+            " version "
+            Lucid.a_
+                [ Lucid.class_ "color-inherit"
+                , Lucid.href_
+                $ "https://github.com/tfausak/monadoc/releases/tag/"
+                <> packageVersion
+                ]
+              $ Lucid.toHtml packageVersion
+            " commit "
+            let commit = configCommit $ contextConfig context
+            Lucid.a_
+                [ Lucid.class_ "color-inherit"
+                , Lucid.href_
+                $ "https://github.com/tfausak/monadoc/commit/"
+                <> commit
+                ]
+              . Lucid.toHtml
+              $ Text.take 7 commit
+            "."
 
 
 faviconHandler :: Handler
