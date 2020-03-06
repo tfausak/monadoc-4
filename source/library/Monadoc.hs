@@ -516,14 +516,14 @@ searchHandler :: Context -> Maybe GitHubUser -> Handler
 searchHandler context maybeGitHubUser headers request respond = do
   let
     query =
-      maybe "nothing" fromUtf8 . Monad.join . lookup "q" $ Wai.queryString
+      maybe "nothing" fromUtf8 . Monad.join . lookup "query" $ Wai.queryString
         request
   names <- runApp context $ sqlQuery
     "select distinct name from packages where name like ? limit 50"
     ["%" <> query <> "%"]
   respond
     . htmlResponse Http.ok200 headers
-    . htmlTemplate context maybeGitHubUser
+    . htmlTemplate context maybeGitHubUser request
     $ do
         Lucid.p_ $ "Search results for " <> Lucid.toHtml (show query) <> ":"
         Lucid.ol_ . Monad.forM_ names $ \name ->
@@ -531,15 +531,20 @@ searchHandler context maybeGitHubUser headers request respond = do
 
 
 indexHandler :: Context -> Maybe GitHubUser -> Handler
-indexHandler context maybeGitHubUser headers _ respond =
+indexHandler context maybeGitHubUser headers request respond =
   respond
     . htmlResponse Http.ok200 headers
-    . htmlTemplate context maybeGitHubUser
+    . htmlTemplate context maybeGitHubUser request
     $ Lucid.p_ "\x1f516 Better Haskell documentation."
 
 
-htmlTemplate :: Context -> Maybe GitHubUser -> Lucid.Html () -> Lucid.Html ()
-htmlTemplate context maybeGitHubUser content = do
+htmlTemplate
+  :: Context
+  -> Maybe GitHubUser
+  -> Wai.Request
+  -> Lucid.Html ()
+  -> Lucid.Html ()
+htmlTemplate context maybeGitHubUser request content = do
   Lucid.doctype_
   Lucid.html_ [Lucid.lang_ "en-US"] $ do
     Lucid.head_ $ do
@@ -567,13 +572,22 @@ htmlTemplate context maybeGitHubUser content = do
             Lucid.div_ [Lucid.class_ ""] $ case maybeGitHubUser of
               Nothing -> Lucid.a_
                 [ Lucid.class_ "color-inherit no-underline"
-                , Lucid.href_ $ Text.concat
-                  [ "http://github.com/login/oauth/authorize?client_id="
-                  , configClientId $ contextConfig context
-                  , "&redirect_uri="
-                  , configUrl $ contextConfig context
-                  , "/github-callback"
-                  ]
+                , Lucid.href_
+                $ "http://github.com/login/oauth/authorize"
+                <> renderQuery
+                     [ ("client_id", configClientId $ contextConfig context)
+                     , ( "redirect_uri"
+                       , configUrl (contextConfig context)
+                       <> "/github-callback"
+                       <> renderQuery
+                            [ ( "return-to"
+                              , fromUtf8
+                              $ Wai.rawPathInfo request
+                              <> Wai.rawQueryString request
+                              )
+                            ]
+                       )
+                     ]
                 ]
                 "Log in with GitHub"
               Just gitHubUser ->
@@ -583,7 +597,7 @@ htmlTemplate context maybeGitHubUser content = do
         $ do
             Lucid.input_
               [ Lucid.class_ "mr3 w-100"
-              , Lucid.name_ "q"
+              , Lucid.name_ "query"
               , Lucid.placeholder_ "lens"
               , Lucid.type_ "text"
               ]
@@ -617,6 +631,14 @@ htmlTemplate context maybeGitHubUser content = do
               . Lucid.toHtml
               $ Text.take 7 commit
             "."
+
+
+type Query = [(Text.Text, Text.Text)]
+
+
+renderQuery :: Query -> Text.Text
+renderQuery = fromUtf8 . Http.renderQuery True . fmap
+  (\(k, v) -> (toUtf8 k, Just $ toUtf8 v))
 
 
 faviconHandler :: Handler
@@ -697,11 +719,16 @@ gitHubCallbackHandler context headers request respond =
         \on conflict (login) do update set token = excluded.token \
         \returning guid"
         newGitHubUser
-      let gitHubUser = newGitHubUser { gitHubUserGuid = guid }
-      -- TODO: Redirect to where the user wanted to go.
+      let
+        gitHubUser = newGitHubUser { gitHubUserGuid = guid }
+        location =
+          Maybe.fromMaybe "/"
+            . Monad.join
+            . lookup "return-to"
+            $ Wai.queryString request
       respond
         . statusResponse Http.found302
-        . replaceHeader (Http.hLocation, "/")
+        . replaceHeader (Http.hLocation, location)
         $ replaceHeaders (setCookieHeader context $ Just gitHubUser) headers
     _ -> respond $ statusResponse Http.badRequest400 headers
 
