@@ -33,6 +33,7 @@ import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.UUID as Uuid
 import qualified Data.UUID.V4 as Uuid
+import qualified Data.Vector as Vector
 import qualified Data.Version as Version
 import qualified Database.PostgreSQL.Simple as Sql
 import qualified Database.PostgreSQL.Simple.FromField as Sql hiding (Binary)
@@ -284,6 +285,17 @@ migrations =
   , makeMigration (2020, 2, 29, 16, 28, 0) "drop table blobs"
   , makeMigration (2020, 3, 3, 21, 42, 0) "truncate table virtual_files"
   , makeMigration (2020, 3, 3, 22, 1, 0) "truncate table large_objects cascade"
+  , makeMigration
+    (2020, 3, 5, 21, 26, 0)
+    "create table packages (\
+    \id serial primary key, \
+    \name text not null, \
+    \version integer[] not null, \
+    \revision integer not null, \
+    \hackage_user text not null, \
+    \uploaded_at timestamp with time zone not null, \
+    \virtual_file_name text not null references virtual_files, \
+    \unique (name, version, revision))"
   ]
 
 
@@ -911,8 +923,8 @@ processTarElement ranges revisions element = case element of
             case FilePath.splitExtensions path of
               (file, ".cabal") | file == package -> do
                 let
-                  _owner = Tar.ownerName $ Tar.entryOwnership entry
-                  _time =
+                  owner = Tar.ownerName $ Tar.entryOwnership entry
+                  time =
                     Time.posixSecondsToUTCTime . fromIntegral $ Tar.entryTime
                       entry
                   packageName = Cabal.mkPackageName package
@@ -931,9 +943,7 @@ processTarElement ranges revisions element = case element of
                 let
                   packageNameText =
                     Text.pack $ Cabal.unPackageName packageName
-                oid <- upsertLargeObject content
-                upsertVirtualFile
-                  (mconcat
+                  packagePath = mconcat
                     [ packageNameText
                     , "/"
                     , Text.pack $ Cabal.prettyShow version
@@ -943,13 +953,31 @@ processTarElement ranges revisions element = case element of
                     , packageNameText
                     , ".cabal"
                     ]
+                oid <- upsertLargeObject content
+                upsertVirtualFile packagePath oid
+                sqlExecute
+                  "insert into packages (name, version, revision, hackage_user, uploaded_at, virtual_file_name) \
+                  \values (?, ?, ?, ?, ?, ?) \
+                  \on conflict (name, version, revision) \
+                  \do update set hackage_user = excluded.hackage_user, \
+                  \uploaded_at = excluded.uploaded_at, \
+                  \virtual_file_name = excluded.virtual_file_name"
+                  ( packageNameText
+                  , Vector.fromList $ Cabal.versionNumbers version
+                  , naturalToInteger revision
+                  , owner
+                  , time
+                  , packagePath
                   )
-                  oid
                 pure () -- TODO
               (_, ".json") -> pure ()
               _ -> fail $ "unexpected tar extension: " <> show entry
           _ -> fail $ "unexpected tar path: " <> show entry
     _ -> fail $ "unexpected tar content: " <> show entry
+
+
+naturalToInteger :: Natural.Natural -> Integer
+naturalToInteger = fromIntegral
 
 
 fromUtf8 :: ByteString.ByteString -> Text.Text
