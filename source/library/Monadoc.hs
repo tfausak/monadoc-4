@@ -962,10 +962,7 @@ processHackageIndex contents = do
   let
     digests = Map.fromList $ fmap
       (\(name, version, revision, digest) ->
-        ( ( Cabal.mkPackageName name
-          , Cabal.mkVersion $ Vector.toList version
-          , integerToNatural revision
-          )
+        ( (Cabal.mkPackageName name, version, integerToNatural revision)
         , digest :: Digest
         )
       )
@@ -984,6 +981,31 @@ processHackageIndex contents = do
     $ Map.toList ranges
 
 
+newtype Version = Version
+  { unwrapVersion :: [Int]
+  } deriving (Eq, Ord, Show)
+
+
+instance Sql.FromField Version where
+  fromField field = fmap (Version . Vector.toList) . Sql.fromField field
+
+
+instance Cabal.Parsec Version where
+  parsec = fmap (Version . Cabal.versionNumbers) Cabal.parsec
+
+
+instance Cabal.Pretty Version where
+  pretty = Cabal.pretty . toCabalVersion
+
+
+instance Sql.ToField Version where
+  toField = Sql.toField . Vector.fromList . unwrapVersion
+
+
+toCabalVersion :: Version -> Cabal.Version
+toCabalVersion = Cabal.mkVersion . unwrapVersion
+
+
 integerToNatural :: Integer -> Natural.Natural
 integerToNatural = fromIntegral
 
@@ -991,7 +1013,7 @@ integerToNatural = fromIntegral
 processTarElement
   :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
   -> Stm.TVar (Map.Map Cabal.PackageIdentifier Natural.Natural)
-  -> Map.Map (Cabal.PackageName, Cabal.Version, Natural.Natural) Digest
+  -> Map.Map (Cabal.PackageName, Version, Natural.Natural) Digest
   -> Either Tar.FormatError Tar.Entry
   -> App ()
 processTarElement ranges revisions digests element = case element of
@@ -1022,8 +1044,10 @@ processTarElement ranges revisions digests element = case element of
                   packageName = Cabal.mkPackageName package
                 version <- case Cabal.simpleParsec versionString of
                   Nothing -> fail $ "invalid package version: " <> show entry
-                  Just version -> pure (version :: Cabal.Version)
-                let packageId = Cabal.PackageIdentifier packageName version
+                  Just version -> pure version
+                let
+                  packageId = Cabal.PackageIdentifier packageName
+                    $ toCabalVersion version
                 revision <-
                   IO.liftIO
                   . fmap (Map.findWithDefault 0 packageId)
@@ -1060,7 +1084,7 @@ processTarElement ranges revisions digests element = case element of
                       \uploaded_at = excluded.uploaded_at, \
                       \virtual_file_name = excluded.virtual_file_name"
                       ( packageNameText
-                      , Vector.fromList $ Cabal.versionNumbers version
+                      , version
                       , naturalToInteger revision
                       , owner
                       , time
