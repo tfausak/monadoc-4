@@ -979,19 +979,21 @@ processHackageIndex contents = do
         \on conflict (package) do update set range = excluded.range"
     . fmap (\(pkg, rng) -> (Cabal.unPackageName pkg, Cabal.prettyShow rng))
     $ Map.toList ranges
+  -- TODO: Walk over the now populated `packages` table.
 
 
 newtype Version = Version
-  { unwrapVersion :: [Int]
+  { unwrapVersion :: Vector.Vector Int
   } deriving (Eq, Ord, Show)
 
 
 instance Sql.FromField Version where
-  fromField field = fmap (Version . Vector.toList) . Sql.fromField field
+  fromField field = fmap Version . Sql.fromField field
 
 
 instance Cabal.Parsec Version where
-  parsec = fmap (Version . Cabal.versionNumbers) Cabal.parsec
+  parsec =
+    fmap (Version . Vector.fromList . Cabal.versionNumbers) Cabal.parsec
 
 
 instance Cabal.Pretty Version where
@@ -999,11 +1001,11 @@ instance Cabal.Pretty Version where
 
 
 instance Sql.ToField Version where
-  toField = Sql.toField . Vector.fromList . unwrapVersion
+  toField = Sql.toField . unwrapVersion
 
 
 toCabalVersion :: Version -> Cabal.Version
-toCabalVersion = Cabal.mkVersion . unwrapVersion
+toCabalVersion = Cabal.mkVersion . Vector.toList . unwrapVersion
 
 
 integerToNatural :: Integer -> Natural.Natural
@@ -1090,7 +1092,6 @@ processTarElement ranges revisions digests element = case element of
                       , time
                       , packagePath
                       )
-                    pure () -- TODO
               (_, ".json") -> pure ()
               _ -> fail $ "unexpected tar extension: " <> show entry
           _ -> fail $ "unexpected tar path: " <> show entry
