@@ -58,7 +58,6 @@ import qualified Network.HTTP.Types.Header as Http
 import qualified Network.URI as Uri
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
-import qualified Numeric.Natural as Natural
 import qualified Paths_monadoc as Package
 import qualified System.Environment as Environment
 import qualified System.FilePath as FilePath
@@ -962,9 +961,7 @@ processHackageIndex contents = do
   let
     digests = Map.fromList $ fmap
       (\(name, version, revision, digest) ->
-        ( (Cabal.mkPackageName name, version, integerToNatural revision)
-        , digest :: Digest
-        )
+        ((Cabal.mkPackageName name, version, revision), digest :: Digest)
       )
       rows
   mapM_ (processTarElement rangesVar revisionsVar digests)
@@ -980,6 +977,39 @@ processHackageIndex contents = do
     . fmap (\(pkg, rng) -> (Cabal.unPackageName pkg, Cabal.prettyShow rng))
     $ Map.toList ranges
   -- TODO: Walk over the now populated `packages` table.
+
+
+newtype Revision = Revision
+  { unwrapRevision :: Word
+  } deriving (Eq, Ord, Show)
+
+
+instance Sql.FromField Revision where
+  fromField field maybeByteString = do
+    int <- Sql.fromField field maybeByteString
+    case intToWord int of
+      Nothing -> Sql.returnError Sql.ConversionFailed field "invalid revision"
+      Just word -> pure $ Revision word
+
+
+instance Monoid Revision where
+  mempty = Revision 0
+
+
+instance Semigroup Revision where
+  Revision x <> Revision y = Revision $ x + y
+
+
+instance Sql.ToField Revision where
+  toField = Sql.toField . unwrapRevision
+
+
+intToWord :: Int -> Maybe Word
+intToWord int = if int < 0 then Nothing else Just $ fromIntegral int
+
+
+revisionToText :: Revision -> Text.Text
+revisionToText = showText . unwrapRevision
 
 
 newtype Version = Version
@@ -1008,14 +1038,10 @@ toCabalVersion :: Version -> Cabal.Version
 toCabalVersion = Cabal.mkVersion . Vector.toList . unwrapVersion
 
 
-integerToNatural :: Integer -> Natural.Natural
-integerToNatural = fromIntegral
-
-
 processTarElement
   :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
-  -> Stm.TVar (Map.Map Cabal.PackageIdentifier Natural.Natural)
-  -> Map.Map (Cabal.PackageName, Version, Natural.Natural) Digest
+  -> Stm.TVar (Map.Map Cabal.PackageIdentifier Revision)
+  -> Map.Map (Cabal.PackageName, Version, Revision) Digest
   -> Either Tar.FormatError Tar.Entry
   -> App ()
 processTarElement ranges revisions digests element = case element of
@@ -1052,12 +1078,13 @@ processTarElement ranges revisions digests element = case element of
                     $ toCabalVersion version
                 revision <-
                   IO.liftIO
-                  . fmap (Map.findWithDefault 0 packageId)
+                  . fmap (Map.findWithDefault mempty packageId)
                   $ Stm.readTVarIO revisions
                 IO.liftIO
                   . Stm.atomically
                   . Stm.modifyTVar revisions
-                  $ Map.insertWith (+) packageId 1
+                  . Map.insertWith mappend packageId
+                  $ Revision 1
                 let actualDigest = makeDigest content
                 case Map.lookup (packageName, version, revision) digests of
                   Just expectedDigest | expectedDigest == actualDigest ->
@@ -1071,7 +1098,7 @@ processTarElement ranges revisions digests element = case element of
                         , "/"
                         , Text.pack $ Cabal.prettyShow version
                         , "/"
-                        , showText revision
+                        , revisionToText revision
                         , "/"
                         , packageNameText
                         , ".cabal"
@@ -1087,7 +1114,7 @@ processTarElement ranges revisions digests element = case element of
                       \virtual_file_name = excluded.virtual_file_name"
                       ( packageNameText
                       , version
-                      , naturalToInteger revision
+                      , revision
                       , owner
                       , time
                       , packagePath
@@ -1096,10 +1123,6 @@ processTarElement ranges revisions digests element = case element of
               _ -> fail $ "unexpected tar extension: " <> show entry
           _ -> fail $ "unexpected tar path: " <> show entry
     _ -> fail $ "unexpected tar content: " <> show entry
-
-
-naturalToInteger :: Natural.Natural -> Integer
-naturalToInteger = fromIntegral
 
 
 fromUtf8 :: ByteString.ByteString -> Text.Text
