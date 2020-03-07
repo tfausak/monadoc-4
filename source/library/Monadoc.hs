@@ -1021,17 +1021,17 @@ instance Sql.FromField Version where
   fromField field = fmap Version . Sql.fromField field
 
 
-instance Cabal.Parsec Version where
-  parsec =
-    fmap (Version . Vector.fromList . Cabal.versionNumbers) Cabal.parsec
-
-
-instance Cabal.Pretty Version where
-  pretty = Cabal.pretty . toCabalVersion
-
-
 instance Sql.ToField Version where
   toField = Sql.toField . unwrapVersion
+
+
+stringToVersion :: String -> Maybe Version
+stringToVersion =
+  fmap (Version . Vector.fromList . Cabal.versionNumbers) . Cabal.simpleParsec
+
+
+versionToText :: Version -> Text.Text
+versionToText = Text.pack . Cabal.prettyShow . toCabalVersion
 
 
 toCabalVersion :: Version -> Cabal.Version
@@ -1070,7 +1070,7 @@ processTarElement ranges revisions digests element = case element of
                     Time.posixSecondsToUTCTime . fromIntegral $ Tar.entryTime
                       entry
                   packageName = Cabal.mkPackageName package
-                version <- case Cabal.simpleParsec versionString of
+                version <- case stringToVersion versionString of
                   Nothing -> fail $ "invalid package version: " <> show entry
                   Just version -> pure version
                 let
@@ -1096,7 +1096,7 @@ processTarElement ranges revisions digests element = case element of
                       packagePath = mconcat
                         [ packageNameText
                         , "/"
-                        , Text.pack $ Cabal.prettyShow version
+                        , versionToText version
                         , "/"
                         , revisionToText revision
                         , "/"
