@@ -494,6 +494,8 @@ application context request respond = do
     ("GET", ["favicon.ico"]) -> faviconHandler headers request respond
     ("GET", ["health-check"]) ->
       healthCheckHandler context headers request respond
+    ("GET", ["package", name]) ->
+      packageHandler context maybeGitHubUser name headers request respond
     ("GET", ["robots.txt"]) -> robotsHandler headers request respond
     ("GET", ["search"]) ->
       searchHandler context maybeGitHubUser headers request respond
@@ -509,6 +511,49 @@ type Handler
   -> Wai.Request
   -> (Wai.Response -> IO Wai.ResponseReceived)
   -> IO Wai.ResponseReceived
+
+
+packageHandler :: Context -> Maybe GitHubUser -> Text.Text -> Handler
+packageHandler context maybeGitHubUser name headers request respond = do
+  rows <- runApp context $ sqlQuery
+    "select version, revision, hackage_user, uploaded_at \
+    \from packages \
+    \where name = ? \
+    \order by version desc, revision desc"
+    [name]
+  if null rows
+    then respond $ statusResponse Http.notFound404 headers
+    else
+      respond
+      . htmlResponse Http.ok200 headers
+      . htmlTemplate context maybeGitHubUser request
+      $ do
+          Lucid.h2_ $ Lucid.toHtml name
+          Lucid.table_ [Lucid.class_ "collapse w-100"] $ do
+            Lucid.thead_ . Lucid.tr_ $ do
+              Lucid.th_ [Lucid.class_ "pa1"] "Version"
+              Lucid.th_ [Lucid.class_ "pa1"] "Revision"
+              Lucid.th_ [Lucid.class_ "pa1"] "Uploaded by"
+              Lucid.th_ [Lucid.class_ "pa1"] "Uploaded at"
+            Lucid.tbody_
+              . Monad.forM_ (zip [0 ..] rows)
+              $ \(index, (version, revision, hackageUser, uploadedAt)) ->
+                  Lucid.tr_
+                      [ Lucid.class_
+                          $ if odd (index :: Int) then "bg-light-gray" else ""
+                      ]
+                    $ do
+                        Lucid.td_ [Lucid.class_ "pa1"]
+                          . Lucid.toHtml
+                          $ versionToText version
+                        Lucid.td_ [Lucid.class_ "pa1"]
+                          . Lucid.toHtml
+                          $ revisionToText revision
+                        Lucid.td_ [Lucid.class_ "pa1"]
+                          $ Lucid.toHtml (hackageUser :: Text.Text)
+                        Lucid.td_ [Lucid.class_ "pa1"]
+                          . Lucid.toHtml
+                          $ formatTime (uploadedAt :: Time.UTCTime)
 
 
 searchHandler :: Context -> Maybe GitHubUser -> Handler
