@@ -570,8 +570,10 @@ searchHandler context maybeGitHubUser headers request respond = do
     . htmlTemplate context maybeGitHubUser request
     $ do
         Lucid.p_ $ "Search results for " <> Lucid.toHtml (show query) <> ":"
-        Lucid.ol_ . Monad.forM_ names $ \name ->
-          Lucid.li_ $ Lucid.toHtml (Sql.fromOnly name :: Text.Text)
+        Lucid.ol_ . Monad.forM_ (fmap Sql.fromOnly names) $ \name ->
+          Lucid.li_
+            . Lucid.a_ [Lucid.href_ $ "/package/" <> name]
+            $ Lucid.toHtml name
 
 
 indexHandler :: Context -> Maybe GitHubUser -> Handler
