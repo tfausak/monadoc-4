@@ -527,11 +527,9 @@ packageHandler context maybeGitHubUser name headers request respond = do
       versionRows <- runApp context $ sqlQuery
         "select range from preferred_versions where package = ?"
         [name]
-      preferredVersions <- case versionRows of
-        [] -> pure Cabal.anyVersion
-        row : _ -> case Cabal.simpleParsec $ Sql.fromOnly row of
-          Nothing -> fail $ "invalid preferred version range: " <> show row
-          Just versionRange -> pure versionRange
+      let
+        preferredVersions = maybe (VersionRange Cabal.anyVersion) Sql.fromOnly
+          $ Maybe.listToMaybe versionRows
       respond
         . htmlResponse Http.ok200 headers
         . htmlTemplate context maybeGitHubUser request
@@ -555,10 +553,7 @@ packageHandler context maybeGitHubUser name headers request respond = do
                           Lucid.td_ [Lucid.class_ "pa1"] $ do
                             Lucid.toHtml $ versionToText version
                             Monad.unless
-                              (Cabal.withinRange
-                                (toCabalVersion version)
-                                preferredVersions
-                              )
+                              (versionInRange version preferredVersions)
                               " (deprecated)"
                           Lucid.td_ [Lucid.class_ "pa1"]
                             . Lucid.toHtml
@@ -568,6 +563,29 @@ packageHandler context maybeGitHubUser name headers request respond = do
                           Lucid.td_ [Lucid.class_ "pa1"]
                             . Lucid.toHtml
                             $ formatTime (uploadedAt :: Time.UTCTime)
+
+
+newtype VersionRange = VersionRange
+  { unwrapVersionRange :: Cabal.VersionRange
+  } deriving (Eq, Show)
+
+
+instance Sql.FromField VersionRange where
+  fromField field maybeByteString = do
+    string <- Sql.fromField field maybeByteString
+    case Cabal.simpleParsec string of
+      Nothing ->
+        Sql.returnError Sql.ConversionFailed field "invalid version range"
+      Just versionRange -> pure $ VersionRange versionRange
+
+
+instance Sql.ToField VersionRange where
+  toField = Sql.toField . Cabal.prettyShow . unwrapVersionRange
+
+
+versionInRange :: Version -> VersionRange -> Bool
+versionInRange version =
+  Cabal.withinRange (toCabalVersion version) . unwrapVersionRange
 
 
 searchHandler :: Context -> Maybe GitHubUser -> Handler
@@ -1035,7 +1053,7 @@ processHackageIndex contents = do
         (\con qry -> fmap (const []) . Sql.executeMany con qry)
         "insert into preferred_versions (package, range) values (?, ?) \
         \on conflict (package) do update set range = excluded.range"
-    . fmap (\(pkg, rng) -> (Cabal.unPackageName pkg, Cabal.prettyShow rng))
+    . fmap (\(pkg, rng) -> (Cabal.unPackageName pkg, rng))
     $ Map.toList ranges
   -- TODO: Walk over the now populated `packages` table.
 
@@ -1100,7 +1118,7 @@ toCabalVersion = Cabal.mkVersion . Vector.toList . unwrapVersion
 
 
 processTarElement
-  :: Stm.TVar (Map.Map Cabal.PackageName Cabal.VersionRange)
+  :: Stm.TVar (Map.Map Cabal.PackageName VersionRange)
   -> Stm.TVar (Map.Map Cabal.PackageIdentifier Revision)
   -> Map.Map (Cabal.PackageName, Version, Revision) Digest
   -> Either Tar.FormatError Tar.Entry
@@ -1119,9 +1137,11 @@ processTarElement ranges revisions digests element = case element of
                   then pure Cabal.anyVersion
                   else fail $ "invalid preferred versions: " <> show entry
                 Just (Cabal.PackageVersionConstraint _ range) -> pure range
-            IO.liftIO . Stm.atomically . Stm.modifyTVar ranges $ Map.insert
-              (Cabal.mkPackageName package)
-              range
+            IO.liftIO
+              . Stm.atomically
+              . Stm.modifyTVar ranges
+              . Map.insert (Cabal.mkPackageName package)
+              $ VersionRange range
           [package, versionString, path] ->
             case FilePath.splitExtensions path of
               (file, ".cabal") | file == package -> do
