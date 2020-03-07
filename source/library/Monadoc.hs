@@ -596,12 +596,17 @@ htmlTemplate context maybeGitHubUser request content = do
         . Lucid.form_ [Lucid.action_ "/search", Lucid.class_ "flex"]
         $ do
             Lucid.input_
-              [ Lucid.class_ "mr3 w-100"
+              [ Lucid.class_ "b--silver ba input-reset mr3 pa1 w-100"
               , Lucid.name_ "query"
               , Lucid.placeholder_ "lens"
               , Lucid.type_ "text"
               ]
-            Lucid.input_ [Lucid.type_ "submit", Lucid.value_ "Search"]
+            Lucid.input_
+              [ Lucid.class_
+                "b b--silver ba bg-white black input-reset ph3 pointer"
+              , Lucid.type_ "submit"
+              , Lucid.value_ "Search"
+              ]
       Lucid.main_ [Lucid.class_ "pa3"] content
       Lucid.footer_ [Lucid.class_ "mid-gray pa3 tc"]
         . Lucid.p_ [Lucid.class_ "ma0"]
