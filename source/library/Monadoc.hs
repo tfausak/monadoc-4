@@ -22,6 +22,7 @@ import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Fixed as Fixed
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Pool as Pool
@@ -495,7 +496,18 @@ application context request respond = do
     ("GET", ["health-check"]) ->
       healthCheckHandler context headers request respond
     ("GET", ["package", name]) ->
-      packageHandler context maybeGitHubUser name headers request respond
+      packageHandler context name headers request respond
+    ("GET", ["package", name, releaseText]) ->
+      case textToRelease releaseText of
+        Nothing -> notFoundHandler headers request respond
+        Just release -> packageReleaseHandler
+          context
+          maybeGitHubUser
+          name
+          release
+          headers
+          request
+          respond
     ("GET", ["robots.txt"]) -> robotsHandler headers request respond
     ("GET", ["search"]) ->
       searchHandler context maybeGitHubUser headers request respond
@@ -513,56 +525,82 @@ type Handler
   -> IO Wai.ResponseReceived
 
 
-packageHandler :: Context -> Maybe GitHubUser -> Text.Text -> Handler
-packageHandler context maybeGitHubUser name headers request respond = do
-  packageRows <- runApp context $ sqlQuery
-    "select version, revision, hackage_user, uploaded_at \
-    \from packages \
-    \where name = ? \
-    \order by version desc, revision desc"
+packageReleaseHandler
+  :: Context -> Maybe GitHubUser -> Text.Text -> Release -> Handler
+packageReleaseHandler context maybeGitHubUser name release headers request respond
+  = do
+    packageRows <- runApp context $ getPackagesByName name
+    case List.find (\(v, r, _, _) -> Release v r == release) packageRows of
+      Nothing -> notFoundHandler headers request respond
+      Just (_, _, hackageUser, uploadedAt) -> do
+        preferredVersions <- runApp context $ getPreferredVersionsByName name
+        respond
+          . htmlResponse Http.ok200 headers
+          . htmlTemplate context maybeGitHubUser request
+          $ do
+              Lucid.h2_ $ do
+                Lucid.toHtml name
+                " "
+                Lucid.toHtml $ releaseToText release
+                Monad.unless
+                  (versionInRange (releaseVersion release) preferredVersions)
+                  " (deprecated)"
+              Lucid.p_ $ do
+                "Uploaded by "
+                Lucid.a_
+                    [ Lucid.href_
+                      $ "https://hackage.haskell.org/user/"
+                      <> hackageUser
+                    ]
+                  $ Lucid.toHtml hackageUser
+                " on "
+                Lucid.toHtml $ formatTime uploadedAt
+                "."
+              Lucid.ul_ . Monad.forM_ packageRows $ \(ver, rev, _, _) ->
+                Lucid.li_ $ do
+                  let rel = releaseToText $ Release ver rev
+                  Lucid.a_ [Lucid.href_ $ "/package/" <> name <> "/" <> rel]
+                    $ Lucid.toHtml rel
+
+
+getPackagesByName
+  :: Text.Text -> App [(Version, Revision, Text.Text, Time.UTCTime)]
+getPackagesByName name = sqlQuery
+  "select version, revision, hackage_user, uploaded_at from packages where name = ? order by version desc, revision desc"
+  [name]
+
+
+getPreferredVersionsByName :: Text.Text -> App VersionRange
+getPreferredVersionsByName name = do
+  rows <- sqlQuery
+    "select range from preferred_versions where package = ?"
     [name]
-  if null packageRows
-    then respond $ statusResponse Http.notFound404 headers
-    else do
-      versionRows <- runApp context $ sqlQuery
-        "select range from preferred_versions where package = ?"
-        [name]
-      let
-        preferredVersions = maybe (VersionRange Cabal.anyVersion) Sql.fromOnly
-          $ Maybe.listToMaybe versionRows
-      respond
-        . htmlResponse Http.ok200 headers
-        . htmlTemplate context maybeGitHubUser request
-        $ do
-            Lucid.h2_ $ Lucid.toHtml name
-            Lucid.table_ [Lucid.class_ "collapse w-100"] $ do
-              Lucid.thead_ . Lucid.tr_ $ do
-                Lucid.th_ [Lucid.class_ "pa1"] "Version"
-                Lucid.th_ [Lucid.class_ "pa1"] "Revision"
-                Lucid.th_ [Lucid.class_ "pa1"] "Uploaded by"
-                Lucid.th_ [Lucid.class_ "pa1"] "Uploaded at"
-              Lucid.tbody_
-                . Monad.forM_ (zip [0 ..] packageRows)
-                $ \(index, (version, revision, hackageUser, uploadedAt)) ->
-                    Lucid.tr_
-                        [ Lucid.class_ $ if odd (index :: Int)
-                            then "bg-light-gray"
-                            else ""
-                        ]
-                      $ do
-                          Lucid.td_ [Lucid.class_ "pa1"] $ do
-                            Lucid.toHtml $ versionToText version
-                            Monad.unless
-                              (versionInRange version preferredVersions)
-                              " (deprecated)"
-                          Lucid.td_ [Lucid.class_ "pa1"]
-                            . Lucid.toHtml
-                            $ revisionToText revision
-                          Lucid.td_ [Lucid.class_ "pa1"]
-                            $ Lucid.toHtml (hackageUser :: Text.Text)
-                          Lucid.td_ [Lucid.class_ "pa1"]
-                            . Lucid.toHtml
-                            $ formatTime (uploadedAt :: Time.UTCTime)
+  pure $ case rows of
+    [] -> VersionRange Cabal.anyVersion
+    row : _ -> Sql.fromOnly row
+
+
+packageHandler :: Context -> Text.Text -> Handler
+packageHandler context name headers request respond = do
+  packageRows <- runApp context $ getPackagesByName name
+  preferredVersions <- runApp context $ getPreferredVersionsByName name
+  let
+    location v r =
+      toUtf8 $ "/package/" <> name <> "/" <> releaseToText (Release v r)
+  case
+      List.partition
+        (\(v, _, _, _) -> versionInRange v preferredVersions)
+        packageRows
+    of
+      ((v, r, _, _) : _, _) ->
+        respond . statusResponse Http.found302 $ replaceHeader
+          (Http.hLocation, location v r)
+          headers
+      (_, (v, r, _, _) : _) ->
+        respond . statusResponse Http.found302 $ replaceHeader
+          (Http.hLocation, location v r)
+          headers
+      _ -> notFoundHandler headers request respond
 
 
 newtype VersionRange = VersionRange
@@ -1058,6 +1096,27 @@ processHackageIndex contents = do
   -- TODO: Walk over the now populated `packages` table.
 
 
+data Release = Release
+  { releaseVersion :: Version
+  , releaseRevision :: Revision
+  } deriving (Eq, Ord, Show)
+
+
+releaseToText :: Release -> Text.Text
+releaseToText release = Text.concat
+  [ versionToText $ releaseVersion release
+  , "-"
+  , revisionToText $ releaseRevision release
+  ]
+
+
+textToRelease :: Text.Text -> Maybe Release
+textToRelease text = case Text.splitOn "-" text of
+  [version, revision] ->
+    Release <$> textToVersion version <*> textToRevision revision
+  _ -> Nothing
+
+
 newtype Revision = Revision
   { unwrapRevision :: Word
   } deriving (Eq, Ord, Show)
@@ -1091,6 +1150,10 @@ revisionToText :: Revision -> Text.Text
 revisionToText = showText . unwrapRevision
 
 
+textToRevision :: Text.Text -> Maybe Revision
+textToRevision = fmap Revision . Read.readMaybe . Text.unpack
+
+
 newtype Version = Version
   { unwrapVersion :: Vector.Vector Int
   } deriving (Eq, Ord, Show)
@@ -1107,6 +1170,10 @@ instance Sql.ToField Version where
 stringToVersion :: String -> Maybe Version
 stringToVersion =
   fmap (Version . Vector.fromList . Cabal.versionNumbers) . Cabal.simpleParsec
+
+
+textToVersion :: Text.Text -> Maybe Version
+textToVersion = stringToVersion . Text.unpack
 
 
 versionToText :: Version -> Text.Text
