@@ -98,6 +98,10 @@ formatTime =
   Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%dT%H:%M:%S%3QZ"
 
 
+formatDay :: Time.Day -> Text.Text
+formatDay = Text.pack . Time.formatTime Time.defaultTimeLocale "%Y-%m-%d"
+
+
 data Config = Config
   { configClientId :: Text.Text
   , configClientSecret :: Text.Text
@@ -546,21 +550,31 @@ packageReleaseHandler context maybeGitHubUser name release headers request respo
                   (versionInRange (releaseVersion release) preferredVersions)
                   " (deprecated)"
               Lucid.p_ $ do
-                "Uploaded by "
+                "Released on "
+                Lucid.toHtml . formatDay $ Time.utctDay uploadedAt
+                " by "
                 Lucid.a_
                     [ Lucid.href_
                       $ "https://hackage.haskell.org/user/"
                       <> hackageUser
                     ]
                   $ Lucid.toHtml hackageUser
-                " on "
-                Lucid.toHtml $ formatTime uploadedAt
                 "."
-              Lucid.ul_ . Monad.forM_ packageRows $ \(ver, rev, _, _) ->
-                Lucid.li_ $ do
-                  let rel = releaseToText $ Release ver rev
-                  Lucid.a_ [Lucid.href_ $ "/package/" <> name <> "/" <> rel]
-                    $ Lucid.toHtml rel
+              Lucid.h3_ "Releases"
+              Lucid.ul_ [Lucid.class_ "list pl0"]
+                . Monad.forM_ (zip [0 ..] packageRows)
+                $ \(idx, (ver, rev, _, _)) ->
+                    Lucid.li_ [Lucid.class_ "di"] $ do
+                      Monad.when (idx /= (0 :: Int)) ", "
+                      let rel = releaseToText $ Release ver rev
+                      Lucid.a_
+                          [ Lucid.class_
+                            $ if versionInRange ver preferredVersions
+                                then ""
+                                else "mid-gray"
+                          , Lucid.href_ $ "/package/" <> name <> "/" <> rel
+                          ]
+                        $ Lucid.toHtml rel
 
 
 getPackagesByName
@@ -712,14 +726,14 @@ htmlTemplate context maybeGitHubUser request content = do
         . Lucid.form_ [Lucid.action_ "/search", Lucid.class_ "flex"]
         $ do
             Lucid.input_
-              [ Lucid.class_ "b--silver ba input-reset mr3 pa1 w-100"
+              [ Lucid.class_ "b--silver ba br0 input-reset mr3 pa1 w-100"
               , Lucid.name_ "query"
               , Lucid.placeholder_ "lens"
               , Lucid.type_ "text"
               ]
             Lucid.input_
               [ Lucid.class_
-                "b b--silver ba bg-white black input-reset ph3 pointer"
+                "b b--silver ba bg-white black br0 input-reset ph3 pointer"
               , Lucid.type_ "submit"
               , Lucid.value_ "Search"
               ]
