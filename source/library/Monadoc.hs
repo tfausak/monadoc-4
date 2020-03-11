@@ -538,6 +538,19 @@ packageReleaseHandler context maybeGitHubUser name release headers request respo
       Nothing -> notFoundHandler headers request respond
       Just (_, _, hackageUser, uploadedAt) -> do
         preferredVersions <- runApp context $ getPreferredVersionsByName name
+        maybeOid <- runApp context . selectVirtualFile $ mconcat
+          [ name
+          , "/"
+          , versionToText $ releaseVersion release
+          , "/"
+          , revisionToText $ releaseRevision release
+          , "/"
+          , name
+          , ".cabal"
+          ]
+        maybeByteString <- case maybeOid of
+          Nothing -> pure Nothing
+          Just oid -> runApp context $ selectLargeObject oid
         respond
           . htmlResponse Http.ok200 headers
           . htmlTemplate context maybeGitHubUser request
@@ -560,21 +573,29 @@ packageReleaseHandler context maybeGitHubUser name release headers request respo
                     ]
                   $ Lucid.toHtml hackageUser
                 "."
+              case maybeByteString of
+                Nothing -> pure ()
+                Just byteString ->
+                  Lucid.pre_ . Lucid.toHtml $ fromUtf8 byteString
               Lucid.h3_ "Releases"
-              Lucid.ul_ [Lucid.class_ "list pl0"]
-                . Monad.forM_ (zip [0 ..] packageRows)
-                $ \(idx, (ver, rev, _, _)) ->
-                    Lucid.li_ [Lucid.class_ "di"] $ do
-                      Monad.when (idx /= (0 :: Int)) ", "
-                      let rel = releaseToText $ Release ver rev
-                      Lucid.a_
-                          [ Lucid.class_
-                            $ if versionInRange ver preferredVersions
-                                then ""
-                                else "mid-gray"
-                          , Lucid.href_ $ "/package/" <> name <> "/" <> rel
-                          ]
-                        $ Lucid.toHtml rel
+              Lucid.ul_ . Monad.forM_ packageRows $ \(ver, rev, _, _) ->
+                Lucid.li_ $ do
+                  let
+                    rel = releaseToText $ Release ver rev
+                    pref = versionInRange ver preferredVersions
+                  Lucid.a_
+                      [ Lucid.class_ $ if pref then "" else "mid-gray"
+                      , Lucid.href_ $ "/package/" <> name <> "/" <> rel
+                      , Lucid.title_ $ mconcat
+                        [ name
+                        , " version "
+                        , versionToText ver
+                        , " revision "
+                        , revisionToText rev
+                        , if pref then "" else " (deprecated)"
+                        ]
+                      ]
+                    $ Lucid.toHtml rel
 
 
 getPackagesByName
